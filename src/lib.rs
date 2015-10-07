@@ -42,16 +42,21 @@ pub const CERT_FIND_SHA1_HASH: DWORD = CERT_COMPARE_SHA1_HASH << CERT_COMPARE_SH
 // TODO: renegotiation, disconnect, Fix behavior without inernet (Reading 0 bytes..)
 // TODO: Manual certificate validation
 
-/// SSL wrapper configuration
-pub struct SslInfo 
+
+pub enum SslInfo {
+    Client(SslInfoClient),
+    Server(SslInfoServer)
+}
+
+/// SSL client wrapper configuration
+pub struct SslInfoClient
 {
     /// A pointer to a null-terminated string that uniquely identifies the target server (e.g. www.google.de)
-    pub target_name: String,
-    pub server_info: Option<SslInfoPeer>
+    pub target_name: String
 }
 
 /// SSL wrapper configuration, which only applies to SSL peers/servers
-pub struct SslInfoPeer
+pub struct SslInfoServer
 {
     cert_store: *mut c_void,
     cert_ctxt: *const winapi::wincrypt::CERT_CONTEXT
@@ -74,10 +79,10 @@ pub enum SslCertCondition
 }
 
 /// SSL wrapper for generic streams
-pub struct SslStream<S> 
+pub struct SslStream<'a, S> 
 {
     stream: S,
-    info: SslInfo,
+    info: &'a SslInfo,
     ctxt: CtxtHandle,
     cred_handle: CredHandle,
     stream_sizes: SecPkgContext_StreamSizes,
@@ -120,10 +125,10 @@ macro_rules! map_security_error {
         })
 }
 
-impl SslInfoPeer
+impl SslInfoServer
 {
     /// Create a new SslInfo containing the certificate loaded according to the params
-    pub fn new(store: SslCertStore, cond: SslCertCondition) -> Result<SslInfoPeer, SslError>
+    pub fn new(store: SslCertStore, cond: SslCertCondition) -> Result<SslInfoServer, SslError>
     {
         let store_location = match store {
             SslCertStore::CurrentUser => CERT_SYSTEM_STORE_CURRENT_USER,
@@ -169,14 +174,14 @@ impl SslInfoPeer
         if ctxt == ptr::null_mut() {
             return Err(SslError::CertNotFound)
         }
-        return Ok(SslInfoPeer {
+        return Ok(SslInfoServer {
             cert_store: handle,
             cert_ctxt: ctxt
         })
     }
 }
 
-impl Drop for SslInfoPeer
+impl Drop for SslInfoServer
 {
     fn drop(&mut self) {
         unsafe {
@@ -187,10 +192,10 @@ impl Drop for SslInfoPeer
 }
 
 
-impl<S: Read+Write> SslStream<S> 
+impl<'a, S: Read+Write> SslStream<'a, S> 
 {
     /// Instantiate a new SSL-stream, initializing the stream including a handshake
-    pub fn new(stream: S, ssl_info: SslInfo) -> Result<SslStream<S>, SslError>
+    pub fn new(stream: S, ssl_info: &SslInfo) -> Result<SslStream<S>, SslError>
     {
         let mut ssl_stream = SslStream { 
             stream: stream, 
@@ -326,27 +331,41 @@ impl<S: Read+Write> SslStream<S>
 
     fn get_credentials_handle(&mut self) -> Option<SslError>
     {
+        let mut cert_amount: DWORD = 0;
+        let mut cert_ctxts = match self.info {
+            &SslInfo::Client(_) => ptr::null_mut(),
+            &SslInfo::Server(ref info) => {
+                cert_amount = 1;
+                [info.cert_ctxt].as_ptr() as *mut *const CERT_CONTEXT
+            }
+        };
+
         let mut creds = SCHANNEL_CRED { 
             dwVersion: SCHANNEL_CRED_VERSION,
             grbitEnabledProtocols: SP_PROT_ALL,
             dwFlags: SCH_CRED_AUTO_CRED_VALIDATION | /*SCH_CRED_MANUAL_CRED_VALIDATION | */SCH_CRED_NO_DEFAULT_CREDS,
-
             dwCredFormat: 0,
             aphMappers: ptr::null_mut(),
-            paCred: ptr::null_mut(),
+            paCred: cert_ctxts,
             cMappers: 0,
             palgSupportedAlgs: ptr::null_mut(),
             cSupportedAlgs: 0,
             dwSessionLifespan: 0,
-            cCreds: 0,
+            cCreds: cert_amount,
             dwMaximumCipherStrength: 0,
             hRootStore: ptr::null_mut(),
             dwMinimumCipherStrength: 0
         };
+
+        let cred_use = match self.info {
+            &SslInfo::Client(_) => SECPKG_CRED_OUTBOUND,
+            &SslInfo::Server(_) => SECPKG_CRED_INBOUND
+        };
+
         let status = unsafe { secur32::AcquireCredentialsHandleW(
                 ptr::null_mut(),
                 OsStr::new(UNISP_NAME).encode_wide().chain(Some(0)).collect::<Vec<_>>().as_mut_ptr(),
-                SECPKG_CRED_OUTBOUND,
+                cred_use,
                 ptr::null_mut(),
                 &mut creds as *mut _ as *mut c_void,
                 None,
@@ -355,6 +374,7 @@ impl<S: Read+Write> SslStream<S>
                 ptr::null_mut()
             ) 
         };
+
         if status != SEC_E_OK {
             return Some(map_security_error!(status))
         }
@@ -372,28 +392,52 @@ impl<S: Read+Write> SslStream<S>
 
     fn initialize_ssl_context(&mut self) -> Option<SslError>
     {
-        // Initialize some req buffers
+        // Initialize some req buffers (output)
         let mut sec_buffer = SecBuffer { cbBuffer: 0, BufferType: SECBUFFER_TOKEN, pvBuffer: ptr::null_mut() };
         let mut sec_buffer_desc = SecBufferDesc { cBuffers: 1, pBuffers: &mut sec_buffer, ulVersion: SECBUFFER_VERSION };
         let mut out_flags: DWORD = 0;
 
         let flags = self.get_ssl_flags();
-        let status = unsafe { 
-            secur32::InitializeSecurityContextW(
-                &mut self.cred_handle as *mut CredHandle,
-                ptr::null_mut(), // (null on first call)
-                OsStr::new(&self.info.target_name).encode_wide().chain(Some(0).into_iter()).collect::<Vec<_>>().as_mut_ptr(),
-                flags,
-                0,
-                0,
-                ptr::null_mut(),
-                0,
-                &mut self.ctxt as *mut CtxtHandle,
-                &mut sec_buffer_desc as *mut SecBufferDesc,
-                &mut out_flags as *mut u32,
-                ptr::null_mut()
-            )
+
+        let mut status;
+        match self.info {
+            &SslInfo::Client(ref client_info) => {
+                status = unsafe { 
+                    secur32::InitializeSecurityContextW(
+                        &mut self.cred_handle as *mut CredHandle,
+                        ptr::null_mut(), // (null on first call)
+                        OsStr::new(&client_info.target_name).encode_wide().chain(Some(0).into_iter()).collect::<Vec<_>>().as_mut_ptr(),
+                        flags,
+                        0,
+                        0,
+                        ptr::null_mut(),
+                        0,
+                        &mut self.ctxt as *mut CtxtHandle,
+                        &mut sec_buffer_desc as *mut SecBufferDesc,
+                        &mut out_flags as *mut u32,
+                        ptr::null_mut()
+                    )
+                };
+            }
+            &SslInfo::Server(_) => {
+                // Prepare additional input buffers
+                return None;
+                /*status = unsafe {
+                    secur32::AcceptSecurityContext(
+                        &mut self.cred_handle as *mut CredHandle,
+                        ptr::null_mut(),
+                        ptr::null_mut(), //pInput probably needed
+                        flags,
+                        0,
+                        &mut self.ctxt as *mut CtxtHandle,
+                        &mut sec_buffer_desc as *mut SecBufferDesc,
+                        &mut out_flags as *mut u32,
+                        ptr::null_mut()
+                    )
+                };*/
+            }
         };
+
         if status != SEC_I_CONTINUE_NEEDED {
             return Some(map_security_error!(status))
         }
@@ -412,6 +456,7 @@ impl<S: Read+Write> SslStream<S>
         let mut read_buffer = Vec::new();
         let flags = self.get_ssl_flags();
         let mut status = SEC_I_CONTINUE_NEEDED;
+
         while status == SEC_I_CONTINUE_NEEDED || status == SEC_E_INCOMPLETE_MESSAGE || status == SEC_I_INCOMPLETE_CREDENTIALS
         {
             if status == SEC_E_INCOMPLETE_MESSAGE || read_buffer.len() == 0 {
@@ -420,6 +465,10 @@ impl<S: Read+Write> SslStream<S>
                     Ok(x) => x,
                     Err(_) => 0
                 };
+                // Nothing read, nothing about the state changes
+                if read_bytes == 0 {
+                    continue;
+                }
                 read_buffer.extend(buf[..read_bytes].iter().cloned());
                 println!("Reading {} bytes -> {}", read_bytes, read_buffer.len());
             }
@@ -435,21 +484,47 @@ impl<S: Read+Write> SslStream<S>
             let mut out_buffer_desc = SecBufferDesc { cBuffers: 1, pBuffers: &mut out_buffers[0] as *mut SecBuffer, ulVersion: SECBUFFER_VERSION };
 
             let mut out_flags: DWORD = 0;
-            status = unsafe { secur32::InitializeSecurityContextW(
-                    &mut self.cred_handle as *mut CredHandle,
-                    &mut self.ctxt,
-                    ptr::null_mut(),
-                    flags,
-                    0,
-                    0,
-                    &mut in_buffer_desc,
-                    0,
-                    ptr::null_mut(),
-                    &mut out_buffer_desc,
-                    &mut out_flags as *mut u32,
-                    ptr::null_mut()
-                )
-            };
+            match self.info {
+                &SslInfo::Client(ref client_info) => {
+                    status = unsafe { 
+                        secur32::InitializeSecurityContextW(
+                            &mut self.cred_handle as *mut CredHandle,
+                            &mut self.ctxt,
+                            ptr::null_mut(),
+                            flags,
+                            0,
+                            0,
+                            &mut in_buffer_desc,
+                            0,
+                            ptr::null_mut(),
+                            &mut out_buffer_desc,
+                            &mut out_flags as *mut u32,
+                            ptr::null_mut()
+                        )
+                    };
+                },
+                &SslInfo::Server(_) => {
+                    status = unsafe {
+                        let stored_ctx = if self.ctxt.dwLower == 0 && self.ctxt.dwUpper == 0 { 
+                            ptr::null_mut() 
+                        } else {
+                            &mut self.ctxt as *mut _
+                        };
+                        secur32::AcceptSecurityContext(
+                            &mut self.cred_handle as *mut CredHandle,
+                            stored_ctx,
+                            &mut in_buffer_desc,
+                            flags,
+                            0,
+                            &mut self.ctxt,
+                            &mut out_buffer_desc as *mut SecBufferDesc,
+                            &mut out_flags as *mut u32,
+                            ptr::null_mut()
+                        )
+                    }
+                }
+            }
+            println!("run accept {}", status);
             if (status != SEC_E_OK && status != SEC_E_INVALID_TOKEN && status != SEC_I_CONTINUE_NEEDED) || ((out_flags & ISC_RET_EXTENDED_ERROR) != 0) {
                 continue;
             }
@@ -504,7 +579,7 @@ impl<S: Read+Write> SslStream<S>
     }
 }
 
-impl<S> Drop for SslStream<S>
+impl<'a, S> Drop for SslStream<'a, S>
 {
     fn drop(&mut self) {
         unsafe {
