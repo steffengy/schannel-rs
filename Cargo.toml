@@ -1,0 +1,23 @@
+[package]
+
+name = "schannel"
+version = "0.0.1"
+authors = [ "steffenb198@aol.com" ]
+
+[lib]
+name = "schannel"
+path = "src/lib.rs"
+test = false
+bench = false
+
+[dependencies]
+rustc-serialize = "0.3"
+
+[dependencies.winapi]
+git="https://github.com/retep998/winapi-rs.git"
+
+[dependencies.secur32-sys]
+git="https://github.com/retep998/winapi-rs.git"
+
+[dependencies.crypt32-sys]
+git="https://github.com/retep998/winapi-rs.git"
