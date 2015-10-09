@@ -12,6 +12,11 @@ bench = false
 
 [dependencies]
 rustc-serialize = "0.3"
+hyper = { version = "*", optional = true, default-features = false }
+log = "0.3"
+
+[dev-dependencies]
+env_logger = "*"
 
 [dependencies.winapi]
 git="https://github.com/retep998/winapi-rs.git"
@@ -21,3 +26,7 @@ git="https://github.com/retep998/winapi-rs.git"
 
 [dependencies.crypt32-sys]
 git="https://github.com/retep998/winapi-rs.git"
+
+[features]
+default = ["hyper"]
+

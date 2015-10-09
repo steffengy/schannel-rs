@@ -1,20 +1,31 @@
-//! Winssl is a pure-Rust wrapper to provide SSL functionality under windows by using schannel, which
+//! Schannel is a pure-Rust wrapper to provide SSL functionality under windows by using schannel, which
 //! removes the requirement of openssl.
 
+#[macro_use]
+extern crate log;
 extern crate winapi;
 extern crate crypt32;
 extern crate secur32;
 extern crate rustc_serialize;
 
+#[cfg(feature = "hyper")]
+extern crate hyper;
+
+#[cfg(feature = "hyper")]
+pub mod hyperimpl;
+
+use std::error::Error;
+use std::fmt::{self, Display};
 use std::io::prelude::*;
 use std::ptr;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::slice;
+use std::sync::Arc;
 use winapi::*;
 use secur32::*;
 use crypt32::*;
-use rustc_serialize::hex::{FromHex, ToHex};
+use rustc_serialize::hex::{FromHex};
 
 // TODO: Add constants to winapi-rs
 pub const CERT_STORE_PROV_SYSTEM_W: DWORD = 10;
@@ -30,7 +41,6 @@ pub const CERT_SYSTEM_STORE_CURRENT_USER: DWORD = CERT_SYSTEM_STORE_CURRENT_USER
 pub const CERT_SYSTEM_STORE_LOCAL_MACHINE: DWORD = CERT_SYSTEM_STORE_LOCAL_MACHINE_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT;
 pub const CERT_SYSTEM_STORE_USERS: DWORD = CERT_SYSTEM_STORE_USERS_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT;
 
-pub const CERT_STORE_DEFER_CLOSE_UNTIL_LAST_FREE_FLAG: DWORD = 0x00000004;
 pub const CERT_STORE_READONLY_FLAG: DWORD = 0x00008000;
 
 pub const CERT_COMPARE_SHA1_HASH: DWORD = 1;
@@ -38,29 +48,44 @@ pub const CERT_COMPARE_SHIFT: DWORD = 16;
 
 pub const CERT_FIND_SHA1_HASH: DWORD = CERT_COMPARE_SHA1_HASH << CERT_COMPARE_SHIFT;
 
-// TODO: General error handling
-// TODO: renegotiation, disconnect, Fix behavior without inernet (Reading 0 bytes..)
-// TODO: Manual certificate validation
+// TODO: General error handling and checks (if initialized for credential, stream_sizes, ...)
+// TODO: renegotiation, disconnect
+// TODO: Manual certificate validation, respect disable_peer_verification
+// TODO: Find out while sometimes certificate loading fails
 
+#[derive(Debug)]
+pub struct SchannelCertStore(*mut c_void);
+#[derive(Debug)]
+pub struct SchannelCertCtxt(*const winapi::wincrypt::CERT_CONTEXT);
+#[derive(Debug)]
+pub struct SchannelCredHandle(CredHandle);
+#[derive(Debug)]
+pub struct SchannelCtxtHandle(CtxtHandle);
 
+#[derive(Debug)]
 pub enum SslInfo {
     Client(SslInfoClient),
     Server(SslInfoServer)
 }
 
 /// SSL client wrapper configuration
+#[derive(Debug)]
 pub struct SslInfoClient
 {
-    /// A pointer to a null-terminated string that uniquely identifies the target server (e.g. www.google.de)
-    pub target_name: String
+    /// Whether to validate the peer certificate
+    pub disable_peer_verification: bool
 }
 
 /// SSL wrapper configuration, which only applies to SSL peers/servers
+#[derive(Debug)]
 pub struct SslInfoServer
 {
-    cert_store: *mut c_void,
-    cert_ctxt: *const winapi::wincrypt::CERT_CONTEXT
+    cert_store: Arc<SchannelCertStore>,
+    cert_ctxt: Arc<SchannelCertCtxt>
 }
+
+unsafe impl Send for SslInfoServer {}
+unsafe impl Sync for SslInfoServer {}
 
 #[derive(Debug)]
 pub enum SslCertStore
@@ -79,14 +104,18 @@ pub enum SslCertCondition
 }
 
 /// SSL wrapper for generic streams
-pub struct SslStream<'a, S> 
+#[derive(Debug, Clone)]
+pub struct SslStream<S> 
 {
     stream: S,
-    info: &'a SslInfo,
-    ctxt: CtxtHandle,
-    cred_handle: CredHandle,
+    info: Arc<SslInfo>,
+    /// A pointer to a null-terminated string that uniquely identifies the target server (e.g. www.google.de)
+    target_name: Option<String>,
+    ctxt: Arc<SchannelCtxtHandle>,
+    cred_handle: Arc<SchannelCredHandle>,
     stream_sizes: SecPkgContext_StreamSizes,
     read_buf: Option<Vec<u8>>,
+    read_buf_raw: Option<Vec<u8>>
 }
 
 /// Possible errors which can occur when doing SSL operations (e.g. schannel failure)
@@ -103,7 +132,29 @@ pub enum SslError
     HandshakeFailedNoStreamSizes,
     CertificationStoreOpenFailed,
     CertNotFound,
+    IoError(std::io::Error),
     UnknownError { err_code: i32 }
+}
+
+impl Display for SslError
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            SslError::UnknownError{err_code: err_code} => write!(f, "An unknown error with code({}) occurred", err_code),
+            _ => write!(f, "{:?}", self)
+        }
+    }
+}
+
+impl Error for SslError
+{
+    fn description(&self) -> &str {
+        "TODO SSL Error occurred"
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        None
+    }
 }
 
 macro_rules! map_security_error {
@@ -130,11 +181,11 @@ impl SslInfoServer
     /// Create a new SslInfo containing the certificate loaded according to the params
     pub fn new(store: SslCertStore, cond: SslCertCondition) -> Result<SslInfoServer, SslError>
     {
-        let store_location = match store {
+        let store_location: DWORD = match store {
             SslCertStore::CurrentUser => CERT_SYSTEM_STORE_CURRENT_USER,
             SslCertStore::User => CERT_SYSTEM_STORE_USERS,
             SslCertStore::LocalMachine => CERT_SYSTEM_STORE_LOCAL_MACHINE,
-        } | CERT_STORE_READONLY_FLAG; //| CERT_STORE_DEFER_CLOSE_UNTIL_LAST_FREE_FLAG;
+        } | CERT_STORE_READONLY_FLAG;
         let store_name = OsStr::new("MY").encode_wide().chain(Some(0)).collect::<Vec<_>>().as_mut_ptr();
         let handle = unsafe { 
             CertOpenStore(
@@ -175,45 +226,271 @@ impl SslInfoServer
             return Err(SslError::CertNotFound)
         }
         return Ok(SslInfoServer {
-            cert_store: handle,
-            cert_ctxt: ctxt
+            cert_store: Arc::new(SchannelCertStore(handle)),
+            cert_ctxt: Arc::new(SchannelCertCtxt(ctxt))
         })
     }
 }
 
-impl Drop for SslInfoServer
-{
-    fn drop(&mut self) {
-        unsafe {
-            CertFreeCertificateContext(self.cert_ctxt);
-            CertCloseStore(self.cert_store, 0);
-        }
-    }
-}
+/// ARC mut macro (unsafe) to fetch stored handles
+macro_rules! get_mut_handle(
+    ($self_:ident, $field:ident) => { &(*$self_.$field).0 as *const SecHandle as *mut SecHandle };
+);
 
-
-impl<'a, S: Read+Write> SslStream<'a, S> 
+impl<S: Read + Write> SslStream<S> 
 {
-    /// Instantiate a new SSL-stream, initializing the stream including a handshake
-    pub fn new(stream: S, ssl_info: &SslInfo) -> Result<SslStream<S>, SslError>
+    /// Instantiate a new SSL-stream
+    pub fn new(stream: S, ssl_info: &Arc<SslInfo>) -> Result<SslStream<S>, SslError>
     {
-        let mut ssl_stream = SslStream { 
+        let ssl_stream = SslStream { 
             stream: stream, 
-            info: ssl_info, 
-            ctxt: CtxtHandle { dwLower: 0, dwUpper: 0 },
+            info: ssl_info.clone(),
+            target_name: None,
             stream_sizes: SecPkgContext_StreamSizes { cbHeader: 0, cbTrailer: 0, cbMaximumMessage: 0, cBuffers: 0, cbBlockSize: 0 },
             read_buf: None,
-            cred_handle: CredHandle { dwLower: 0, dwUpper: 0 }
-        };
-        match ssl_stream.init() {
-            Some(x) => return Err(x),
-            None => {}
+            read_buf_raw: None,
+            ctxt: Arc::new(SchannelCtxtHandle(CtxtHandle { dwLower: 0, dwUpper: 0 })),
+            cred_handle: Arc::new(SchannelCredHandle(CredHandle { dwLower: 0, dwUpper: 0 }))
         };
         return Ok(ssl_stream)
     }
 
-    pub fn read(&mut self, dst: &mut [u8]) -> std::io::Result<usize>
+
+    pub fn set_host(&mut self, host: &str)
     {
+        self.target_name = Some(host.to_owned());
+    }
+
+    fn get_credentials_handle(&mut self) -> Option<SslError>
+    {
+        let ssl_info = &*self.info;
+        let mut cert_amount: DWORD = 0;
+
+        let mut flags = SCH_CRED_NO_DEFAULT_CREDS;
+        let cert_ctxts = match ssl_info {
+            &SslInfo::Client(ref info) => {
+                if info.disable_peer_verification {
+                    flags |= SCH_CRED_MANUAL_CRED_VALIDATION;
+                } else {
+                    flags |= SCH_CRED_AUTO_CRED_VALIDATION;
+                }
+                ptr::null_mut()
+            }
+            &SslInfo::Server(ref info) => {
+                cert_amount = 1;
+                [info.cert_ctxt.0].as_ptr() as *mut *const CERT_CONTEXT
+            }
+        };
+
+        let mut creds = SCHANNEL_CRED { 
+            dwVersion: SCHANNEL_CRED_VERSION,
+            grbitEnabledProtocols: SP_PROT_ALL,
+            dwFlags: flags,
+            dwCredFormat: 0,
+            aphMappers: ptr::null_mut(),
+            paCred: cert_ctxts,
+            cMappers: 0,
+            palgSupportedAlgs: ptr::null_mut(),
+            cSupportedAlgs: 0,
+            dwSessionLifespan: 0,
+            cCreds: cert_amount,
+            dwMaximumCipherStrength: 0,
+            hRootStore: ptr::null_mut(),
+            dwMinimumCipherStrength: 0
+        };
+
+        let cred_use = match ssl_info {
+            &SslInfo::Client(_) => SECPKG_CRED_OUTBOUND,
+            &SslInfo::Server(_) => SECPKG_CRED_INBOUND
+        };
+
+        let cred_handle = get_mut_handle!(self, cred_handle);
+        let status = unsafe { secur32::AcquireCredentialsHandleW(
+                ptr::null_mut(),
+                OsStr::new(UNISP_NAME).encode_wide().chain(Some(0)).collect::<Vec<_>>().as_mut_ptr(),
+                cred_use,
+                ptr::null_mut(),
+                &mut creds as *mut _ as *mut c_void,
+                None,
+                ptr::null_mut(),
+                cred_handle as *mut CredHandle,
+                ptr::null_mut()
+            ) 
+        };
+
+        if status != SEC_E_OK {
+            return Some(map_security_error!(status))
+        }
+        return None
+    }
+
+    fn get_ssl_flags(&self) -> u32 {
+        return  ISC_REQ_SEQUENCE_DETECT |
+                ISC_REQ_REPLAY_DETECT   |
+                ISC_REQ_CONFIDENTIALITY |
+                ISC_REQ_ALLOCATE_MEMORY |
+                //ISC_REQ_MANUAL_CRED_VALIDATION |
+                ISC_REQ_STREAM;
+    }
+
+    fn do_handshake(&mut self) -> Option<SslError> 
+    {
+        let ssl_info = &*self.info;
+        let mut read_buffer = Vec::new();
+        let flags = self.get_ssl_flags();
+        let mut status = SEC_I_CONTINUE_NEEDED;
+
+        let mut initial: bool = true;
+        let mut do_read: bool = match ssl_info {
+            &SslInfo::Client(_) => false,
+            &SslInfo::Server(_) => true
+        };
+
+        while status == SEC_I_CONTINUE_NEEDED || status == SEC_E_INCOMPLETE_MESSAGE || status == SEC_I_INCOMPLETE_CREDENTIALS
+        {
+            if do_read && (status == SEC_E_INCOMPLETE_MESSAGE || read_buffer.len() == 0) {
+                let mut buf = [0; 8192];
+                let read_bytes = match self.stream.read(&mut buf) {
+                    Ok(x) => x,
+                    Err(_) => 0
+                };
+                // Nothing read, nothing about the state changes
+                if read_bytes == 0 {
+                    debug!("Read nothing");
+                    break;
+                }
+                read_buffer.extend(buf[..read_bytes].iter().cloned());
+                debug!("Reading {} bytes -> {}", read_bytes, read_buffer.len());
+            }
+
+            // Setup input buffers, buffer 0 is used for data received from the server, leftover data will be placed in buffer 1 (with buffer type SECBUFFER_EXTRA)
+            let mut in_buffers = [
+                SecBuffer { pvBuffer: &mut read_buffer[..] as *mut _ as *mut c_void, cbBuffer: read_buffer.len() as u32, BufferType: SECBUFFER_TOKEN },
+                SecBuffer { pvBuffer: ptr::null_mut(), cbBuffer: 0, BufferType: SECBUFFER_EMPTY }
+            ];
+            let mut in_buffer_desc = SecBufferDesc { cBuffers: 2, pBuffers: &mut in_buffers[0] as *mut SecBuffer, ulVersion: SECBUFFER_VERSION };
+            // Setup output buffers
+            let mut out_buffers = [ SecBuffer { pvBuffer: ptr::null_mut(), BufferType: SECBUFFER_TOKEN, cbBuffer: 0} ];
+            let mut out_buffer_desc = SecBufferDesc { cBuffers: 1, pBuffers: &mut out_buffers[0] as *mut SecBuffer, ulVersion: SECBUFFER_VERSION };
+
+            let mut out_flags: DWORD = 0;
+
+            let ctxt = get_mut_handle!(self, ctxt);
+            let cred_handle = get_mut_handle!(self, cred_handle);
+
+            let mut stored_ctx = match initial {
+                true => ptr::null_mut(),
+                false  => ctxt as *mut _
+            };
+
+            match ssl_info {
+                &SslInfo::Client(_) => {
+                    status = unsafe {
+                        do_read = true;
+                        let mut target_name = ptr::null_mut();
+                        let mut in_buffer_desc_ptr = ptr::null_mut();
+                        if initial && self.target_name != None {
+                            target_name = OsStr::new(&self.target_name.as_mut().unwrap()).encode_wide().chain(Some(0).into_iter()).collect::<Vec<_>>().as_mut_ptr();
+                        } else {
+                            in_buffer_desc_ptr = &mut in_buffer_desc;
+                        }
+
+                        secur32::InitializeSecurityContextW(
+                            cred_handle as *mut CredHandle,
+                            stored_ctx,
+                            target_name,
+                            flags,
+                            0,
+                            0,
+                            in_buffer_desc_ptr,
+                            0,
+                            ctxt,
+                            &mut out_buffer_desc,
+                            &mut out_flags as *mut u32,
+                            ptr::null_mut()
+                        )
+                    };
+                },
+                &SslInfo::Server(_) => {
+                    status = unsafe {
+                        secur32::AcceptSecurityContext(
+                            cred_handle as *mut CredHandle,
+                            stored_ctx,
+                            &mut in_buffer_desc,
+                            flags,
+                            0,
+                            ctxt,
+                            &mut out_buffer_desc,
+                            &mut out_flags as *mut u32,
+                            ptr::null_mut()
+                        )
+                    }
+                }
+            }
+
+            if (status != SEC_E_OK && status != SEC_E_INVALID_TOKEN && status != SEC_I_CONTINUE_NEEDED) || ((out_flags & ISC_RET_EXTENDED_ERROR) != 0) {
+                if !initial {
+                    continue;
+                } else {
+                    return Some(map_security_error!(status))
+                }
+            }
+            else {
+                initial = false;
+                // We have some data to send to the server
+                if out_buffers[0].cbBuffer != 0 && out_buffers[0].pvBuffer != ptr::null_mut() {
+                    debug!("--WRITING {}", out_buffers[0].cbBuffer);
+                    self.stream.write(unsafe { slice::from_raw_parts(out_buffers[0].pvBuffer as *mut u8, out_buffers[0].cbBuffer as usize) }).unwrap();
+                    unsafe { FreeContextBuffer(out_buffers[0].pvBuffer); }
+                }
+            }
+            
+            if status == SEC_E_INCOMPLETE_MESSAGE {
+                debug!("Incomplete; Continue");
+                continue;
+            }
+            if status == SEC_E_OK {
+                let status = unsafe { QueryContextAttributesW(ctxt, SECPKG_ATTR_STREAM_SIZES, &mut self.stream_sizes as *mut _ as *mut c_void) };
+                if status != SEC_E_OK {
+                    return Some(SslError::HandshakeFailedNoStreamSizes);
+                }
+                debug!("-[HANDSHAKE] done {}", in_buffers[1].BufferType == SECBUFFER_EXTRA);
+                return None
+            }
+            // There is extra data to be handled TODO: Handle extra data on success and this might be bugged
+            if in_buffers[1].BufferType == SECBUFFER_EXTRA {
+                debug!("extra data todo this is bugged");
+                let pos = read_buffer.len() - in_buffers[1].cbBuffer as usize;
+                let end_pos = pos + in_buffers[1].cbBuffer as usize;
+                read_buffer = read_buffer[pos..end_pos].to_vec();
+            } else {
+                read_buffer.clear();
+            }
+        }
+        return Some(map_security_error!(status))
+    }
+
+    /// Initialize the connection for the usage of SSL, including performing a handshake
+    pub fn init(&mut self) -> Option<SslError> {
+        match self.get_credentials_handle() {
+            Some(x) => return Some(x),
+            None => {}
+        };
+        match self.do_handshake() {
+            Some(x) => return Some(x),
+            None => {}
+        };
+        return None
+    }
+}
+
+impl<S: Read + Write> Read for SslStream<S>
+{
+    fn read(&mut self, dst: &mut [u8]) -> std::io::Result<usize>
+    {
+        let mut dst_vec: Vec<u8> = Vec::new();
+        let mut data_left = dst.len();
+
         let mut buffers = [ 
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
@@ -222,71 +499,133 @@ impl<'a, S: Read+Write> SslStream<'a, S>
         ];
         let mut message = SecBufferDesc { ulVersion: SECBUFFER_VERSION, cBuffers: 4, pBuffers: &mut buffers[0] as *mut SecBuffer};
 
-        //TODO handle dst.len() > 8192 (buf.len)
-        let mut buf = [0; 8192];
-
         // If we have some data in the buffer already, fetch as much as we might need
-        let mut dst_pos = 0;
         if self.read_buf != None {
             // Already write the amount we need into our dst buffer
-            for (d, s) in dst.iter_mut().zip(self.read_buf.as_mut().unwrap().iter()) {
-                *d = *s;
-                dst_pos += 1;
+            let iterator_len;
+            let available_len;
+            {
+                let rbuf = self.read_buf.as_mut().unwrap();
+                available_len = rbuf.len();
+                let iterator = rbuf.iter().take(dst.len());
+                iterator_len = iterator.len();
+                dst_vec.extend(iterator);
+                data_left -= iterator_len;
             }
             // Make sure we do not read the same data multiple times
-            if dst_pos < self.read_buf.as_mut().unwrap().len() {
-                let vec: Vec<_> = self.read_buf.as_mut().unwrap()[dst_pos..].to_vec();
+            if iterator_len < available_len {
+                let vec: Vec<_> = self.read_buf.as_mut().unwrap()[iterator_len..].to_vec();
                 self.read_buf = Some(vec);
             } else {
                 self.read_buf = None;
             }
         }
 
-        let bytes = self.stream.read(&mut buf).unwrap(); //Error Handling TODO
-        println!("decrypt read: {}", bytes);
+        //TODO: maybe handle that as separate reads/more efficiently?
+        
+        let mut status = SEC_E_INCOMPLETE_MESSAGE;
 
-        buffers[0].pvBuffer = &mut buf as *mut _ as *mut c_void; 
-        buffers[0].cbBuffer = buf.len() as u32;
-        buffers[0].BufferType = SECBUFFER_DATA;
+        let ctxt = get_mut_handle!(self, ctxt);
 
-        buffers[1].BufferType = SECBUFFER_EMPTY;
-        buffers[2].BufferType = SECBUFFER_EMPTY;
-        buffers[3].BufferType = SECBUFFER_EMPTY;
-        unsafe {
-            let status = DecryptMessage(&mut self.ctxt as *mut SecHandle, &mut message as *mut SecBufferDesc, 0, ptr::null_mut());
-            println!("decrypt status: {}", status);
-            match buffers.iter().find(|&buf| buf.BufferType == SECBUFFER_DATA) {
-                Some(data_buffer) => {
-                    println!("data length: {}", data_buffer.cbBuffer);
-                    
-                    let data_buffer = std::slice::from_raw_parts(data_buffer.pvBuffer as *mut u8, data_buffer.cbBuffer as usize);
-                    let mut len = 0;
-                    for (d, s) in dst.iter_mut().skip(dst_pos).zip(data_buffer.iter()) {
-                        *d = *s;
-                        len += 1;
-                    }
+        loop 
+        {
+            let mut buf = vec![0 as u8; 0];
 
-                    // store additional decrypted data
-                    if data_buffer.len() > len {
-                        if self.read_buf == None {
-                            let vec: Vec<u8> = Vec::new();
-                            self.read_buf = Some(vec);
+            // If we have some raw data stored to decrypt, fetch it
+            if self.read_buf_raw != None
+            {
+                let read_buf_data = self.read_buf_raw.as_mut().unwrap().clone();
+                buf.extend(&read_buf_data[..]);
+                debug!("[EXTRA] read {}", read_buf_data.len());
+            }
+
+            let mut i_read_buf = vec![0 as u8; 512 + data_left];
+            let bytes = self.stream.read(&mut i_read_buf).unwrap(); //Error Handling TODO
+            if bytes > 0 {
+                buf.extend(&i_read_buf[..bytes]);
+            }
+
+            if bytes + buf.len() == 0 {
+                if data_left > 0 {
+                    break;
+                }
+                break;
+            }
+            self.read_buf_raw = None;
+
+            buffers[0].pvBuffer = buf.as_mut_ptr() as *mut c_void; 
+            buffers[0].cbBuffer = buf.len() as u32;
+            buffers[0].BufferType = SECBUFFER_DATA;
+
+            buffers[1].BufferType = SECBUFFER_EMPTY;
+            buffers[2].BufferType = SECBUFFER_EMPTY;
+            buffers[3].BufferType = SECBUFFER_EMPTY;
+            unsafe {
+                status = DecryptMessage(ctxt as *mut SecHandle, &mut message as *mut SecBufferDesc, 0, ptr::null_mut());
+                debug!("decrypt status: {}", status);
+
+                // Store extra data (not decrypted yet = raw), if available
+                match buffers.iter().find(|&buf| buf.BufferType == SECBUFFER_EXTRA) {
+                    Some(extra_buf) => {
+                        let extra_buf = std::slice::from_raw_parts(extra_buf.pvBuffer as *mut u8, extra_buf.cbBuffer as usize);
+                        debug!("[EXTRA] store {}", extra_buf.len());
+                        let mut vec: Vec<u8> = Vec::new();
+                        vec.extend(extra_buf);
+                        self.read_buf_raw = Some(vec);                        
+                    },
+                    None => ()
+                }
+
+                // Store decrypted data
+                match buffers.iter().find(|&buf| buf.BufferType == SECBUFFER_DATA) {
+                    Some(data_buffer) => {
+                        debug!("data length: {}", data_buffer.cbBuffer);
+                        
+                        let data_buffer = std::slice::from_raw_parts(data_buffer.pvBuffer as *mut u8, data_buffer.cbBuffer as usize);
+                        let iterator = data_buffer.iter().take(data_left);
+                        let iterator_len = iterator.len();
+                        dst_vec.extend(iterator);
+                        data_left -= iterator_len;
+
+                        // store additional decrypted data
+                        if data_buffer.len() > iterator_len {
+                            if self.read_buf == None {
+                                let vec: Vec<u8> = Vec::new();
+                                self.read_buf = Some(vec);
+                            }
+                            self.read_buf.as_mut().unwrap().extend(data_buffer.iter().skip(iterator_len));
+                            debug!("read_buf: {} bytes", self.read_buf.as_mut().unwrap().len());
                         }
-                        self.read_buf.as_mut().unwrap().extend(data_buffer.iter().skip(len));
-                        println!("read_buf: {} bytes", self.read_buf.as_mut().unwrap().len());
-                    }
-                    println!("\n\nContent ({}) \n\n{}", len, std::str::from_utf8(&dst[..len]).unwrap());
-                    return Ok(dst.len())
-                },
-                None => println!("No data buffer, incomplete: {}", status == SEC_E_INCOMPLETE_MESSAGE)
-            };
-            //TODO handle incomplete messages (SEC_E_INCOMPLETE_MESSAGE)
-        }
-        // TODO
-        Ok(0)
-    }
+                        //println!("\n\nContent ({}) \n\n{}", len, std::str::from_utf8(&dst[..len]).unwrap());
 
-    pub fn write(&mut self, buf: &[u8]) -> std::io::Result<usize>
+                        buf.clear();
+                        if data_left != dst.len() {
+                            break
+                        }
+                    },
+                    None => {
+                        debug!("No data buffer, incomplete: {}", status == SEC_E_INCOMPLETE_MESSAGE)
+                    }
+                };
+            }
+        }
+
+        if dst_vec.len() == 0 {
+            return Ok(0)
+        }
+        debug!("conv_len: {}/{} ({})", dst_vec.len(), dst.len(), data_left);
+        // Copy vector into output slice
+        for (d, s) in dst.iter_mut().zip(dst_vec.iter()) {
+            *d = *s;
+        }
+        //println!("req {}", std::str::from_utf8(dst).unwrap());
+        Ok(dst_vec.len())
+    }
+}
+
+impl<S: Read + Write> Write for SslStream<S>
+{
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize>
     {
         let mut buffers = [ 
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
@@ -317,274 +656,60 @@ impl<'a, S: Read+Write> SslStream<'a, S>
 
         buffers[3].BufferType   = SECBUFFER_EMPTY;
 
+        let ctxt = get_mut_handle!(self, ctxt);
+
+        //TODO: Respect stream_sizes.cbMaximumMessage (encryption length limit)
         unsafe {
-            let status = EncryptMessage(&mut self.ctxt as *mut SecHandle, 0, &mut message as *mut SecBufferDesc, 0);
+            let status = EncryptMessage(ctxt as *mut SecHandle, 0, &mut message as *mut SecBufferDesc, 0);
             if status == SEC_E_OK {
                 let len = buffers[0].cbBuffer as usize + buffers[1].cbBuffer as usize + buffers[2].cbBuffer as usize;
-                println!("Encrypted {}. Sending.", len);
-                self.stream.write(&buffer[..len]);
+                debug!("Encrypted {}. Sending. {}", len, buffers[3].BufferType == SECBUFFER_EMPTY);
+                self.stream.write(&buffer[..len]).unwrap();
             }
         }
-        // TODO
-        Ok(0)
+        Ok(buf.len())
     }
 
-    fn get_credentials_handle(&mut self) -> Option<SslError>
-    {
-        let mut cert_amount: DWORD = 0;
-        let mut cert_ctxts = match self.info {
-            &SslInfo::Client(_) => ptr::null_mut(),
-            &SslInfo::Server(ref info) => {
-                cert_amount = 1;
-                [info.cert_ctxt].as_ptr() as *mut *const CERT_CONTEXT
-            }
-        };
-
-        let mut creds = SCHANNEL_CRED { 
-            dwVersion: SCHANNEL_CRED_VERSION,
-            grbitEnabledProtocols: SP_PROT_ALL,
-            dwFlags: SCH_CRED_AUTO_CRED_VALIDATION | /*SCH_CRED_MANUAL_CRED_VALIDATION | */SCH_CRED_NO_DEFAULT_CREDS,
-            dwCredFormat: 0,
-            aphMappers: ptr::null_mut(),
-            paCred: cert_ctxts,
-            cMappers: 0,
-            palgSupportedAlgs: ptr::null_mut(),
-            cSupportedAlgs: 0,
-            dwSessionLifespan: 0,
-            cCreds: cert_amount,
-            dwMaximumCipherStrength: 0,
-            hRootStore: ptr::null_mut(),
-            dwMinimumCipherStrength: 0
-        };
-
-        let cred_use = match self.info {
-            &SslInfo::Client(_) => SECPKG_CRED_OUTBOUND,
-            &SslInfo::Server(_) => SECPKG_CRED_INBOUND
-        };
-
-        let status = unsafe { secur32::AcquireCredentialsHandleW(
-                ptr::null_mut(),
-                OsStr::new(UNISP_NAME).encode_wide().chain(Some(0)).collect::<Vec<_>>().as_mut_ptr(),
-                cred_use,
-                ptr::null_mut(),
-                &mut creds as *mut _ as *mut c_void,
-                None,
-                ptr::null_mut(),
-                &mut self.cred_handle as *mut CredHandle,
-                ptr::null_mut()
-            ) 
-        };
-
-        if status != SEC_E_OK {
-            return Some(map_security_error!(status))
-        }
-        return None
-    }
-
-    fn get_ssl_flags(&self) -> u32 {
-        return  ISC_REQ_SEQUENCE_DETECT |
-                ISC_REQ_REPLAY_DETECT   |
-                ISC_REQ_CONFIDENTIALITY |
-                ISC_REQ_ALLOCATE_MEMORY |
-                //ISC_REQ_MANUAL_CRED_VALIDATION |
-                ISC_REQ_STREAM;
-    }
-
-    fn initialize_ssl_context(&mut self) -> Option<SslError>
-    {
-        // Initialize some req buffers (output)
-        let mut sec_buffer = SecBuffer { cbBuffer: 0, BufferType: SECBUFFER_TOKEN, pvBuffer: ptr::null_mut() };
-        let mut sec_buffer_desc = SecBufferDesc { cBuffers: 1, pBuffers: &mut sec_buffer, ulVersion: SECBUFFER_VERSION };
-        let mut out_flags: DWORD = 0;
-
-        let flags = self.get_ssl_flags();
-
-        let mut status;
-        match self.info {
-            &SslInfo::Client(ref client_info) => {
-                status = unsafe { 
-                    secur32::InitializeSecurityContextW(
-                        &mut self.cred_handle as *mut CredHandle,
-                        ptr::null_mut(), // (null on first call)
-                        OsStr::new(&client_info.target_name).encode_wide().chain(Some(0).into_iter()).collect::<Vec<_>>().as_mut_ptr(),
-                        flags,
-                        0,
-                        0,
-                        ptr::null_mut(),
-                        0,
-                        &mut self.ctxt as *mut CtxtHandle,
-                        &mut sec_buffer_desc as *mut SecBufferDesc,
-                        &mut out_flags as *mut u32,
-                        ptr::null_mut()
-                    )
-                };
-            }
-            &SslInfo::Server(_) => {
-                // Prepare additional input buffers
-                return None;
-                /*status = unsafe {
-                    secur32::AcceptSecurityContext(
-                        &mut self.cred_handle as *mut CredHandle,
-                        ptr::null_mut(),
-                        ptr::null_mut(), //pInput probably needed
-                        flags,
-                        0,
-                        &mut self.ctxt as *mut CtxtHandle,
-                        &mut sec_buffer_desc as *mut SecBufferDesc,
-                        &mut out_flags as *mut u32,
-                        ptr::null_mut()
-                    )
-                };*/
-            }
-        };
-
-        if status != SEC_I_CONTINUE_NEEDED {
-            return Some(map_security_error!(status))
-        }
-        unsafe {
-            let handshake = slice::from_raw_parts(sec_buffer.pvBuffer as *mut u8, sec_buffer.cbBuffer as usize);
-            self.stream.write(handshake).unwrap(); //TODO: Error Handling
-            FreeContextBuffer(sec_buffer.pvBuffer);
-        }
-
-        println!("Sent {} bytes of handshake data", sec_buffer.cbBuffer);
-        return None;
-    }
-
-    fn do_handshake(&mut self) -> Option<SslError> 
-    {
-        let mut read_buffer = Vec::new();
-        let flags = self.get_ssl_flags();
-        let mut status = SEC_I_CONTINUE_NEEDED;
-
-        while status == SEC_I_CONTINUE_NEEDED || status == SEC_E_INCOMPLETE_MESSAGE || status == SEC_I_INCOMPLETE_CREDENTIALS
-        {
-            if status == SEC_E_INCOMPLETE_MESSAGE || read_buffer.len() == 0 {
-                let mut buf = [0; 4096];
-                let read_bytes = match self.stream.read(&mut buf) {
-                    Ok(x) => x,
-                    Err(_) => 0
-                };
-                // Nothing read, nothing about the state changes
-                if read_bytes == 0 {
-                    continue;
-                }
-                read_buffer.extend(buf[..read_bytes].iter().cloned());
-                println!("Reading {} bytes -> {}", read_bytes, read_buffer.len());
-            }
-
-            // Setup input buffers, buffer 0 is used for data received from the server, leftover data will be placed in buffer 1 (with buffer type SECBUFFER_EXTRA)
-            let mut in_buffers = [
-                SecBuffer { pvBuffer: &mut read_buffer[..] as *mut _ as *mut c_void, cbBuffer: read_buffer.len() as u32, BufferType: SECBUFFER_TOKEN },
-                SecBuffer { pvBuffer: ptr::null_mut(), cbBuffer: 0, BufferType: SECBUFFER_EMPTY }
-            ];
-            let mut in_buffer_desc = SecBufferDesc { cBuffers: 2, pBuffers: &mut in_buffers[0] as *mut SecBuffer, ulVersion: SECBUFFER_VERSION };
-            // Setup output buffers
-            let mut out_buffers = [ SecBuffer { pvBuffer: ptr::null_mut(), BufferType: SECBUFFER_TOKEN, cbBuffer: 0} ];
-            let mut out_buffer_desc = SecBufferDesc { cBuffers: 1, pBuffers: &mut out_buffers[0] as *mut SecBuffer, ulVersion: SECBUFFER_VERSION };
-
-            let mut out_flags: DWORD = 0;
-            match self.info {
-                &SslInfo::Client(ref client_info) => {
-                    status = unsafe { 
-                        secur32::InitializeSecurityContextW(
-                            &mut self.cred_handle as *mut CredHandle,
-                            &mut self.ctxt,
-                            ptr::null_mut(),
-                            flags,
-                            0,
-                            0,
-                            &mut in_buffer_desc,
-                            0,
-                            ptr::null_mut(),
-                            &mut out_buffer_desc,
-                            &mut out_flags as *mut u32,
-                            ptr::null_mut()
-                        )
-                    };
-                },
-                &SslInfo::Server(_) => {
-                    status = unsafe {
-                        let stored_ctx = if self.ctxt.dwLower == 0 && self.ctxt.dwUpper == 0 { 
-                            ptr::null_mut() 
-                        } else {
-                            &mut self.ctxt as *mut _
-                        };
-                        secur32::AcceptSecurityContext(
-                            &mut self.cred_handle as *mut CredHandle,
-                            stored_ctx,
-                            &mut in_buffer_desc,
-                            flags,
-                            0,
-                            &mut self.ctxt,
-                            &mut out_buffer_desc as *mut SecBufferDesc,
-                            &mut out_flags as *mut u32,
-                            ptr::null_mut()
-                        )
-                    }
-                }
-            }
-            println!("run accept {}", status);
-            if (status != SEC_E_OK && status != SEC_E_INVALID_TOKEN && status != SEC_I_CONTINUE_NEEDED) || ((out_flags & ISC_RET_EXTENDED_ERROR) != 0) {
-                continue;
-            }
-            else {
-                // We have some data to send to the server
-                if out_buffers[0].cbBuffer != 0 && out_buffers[0].pvBuffer != ptr::null_mut() {
-                    println!("--WRITING");
-                    self.stream.write(unsafe { slice::from_raw_parts(out_buffers[0].pvBuffer as *mut u8, out_buffers[0].cbBuffer as usize) });
-                    unsafe { FreeContextBuffer(out_buffers[0].pvBuffer); }
-                }
-            }
-            if status == SEC_E_INCOMPLETE_MESSAGE {
-                println!("Incomplete; Continue");
-                continue;
-            }
-            if status == SEC_E_OK {
-                let status = unsafe { QueryContextAttributesW(&mut self.ctxt, SECPKG_ATTR_STREAM_SIZES, &mut self.stream_sizes as *mut _ as *mut c_void) };
-                if status != SEC_E_OK {
-                    return Some(SslError::HandshakeFailedNoStreamSizes);
-                }
-                println!("Handshake done");
-                return None
-            }
-
-            // There is extra data to be handled TODO: Handle extra data on success
-            if in_buffers[1].BufferType == SECBUFFER_EXTRA {
-                let pos = read_buffer.len() - in_buffers[1].cbBuffer as usize;
-                let end_pos = pos + in_buffers[1].cbBuffer as usize;
-                read_buffer = read_buffer[pos..end_pos].to_vec();
-            } else {
-                read_buffer.clear();
-            }
-        }
-        return Some(map_security_error!(status))
-    }
-
-    /// Prepare for the usage of SSL, including performing a handshake
-    fn init(&mut self) -> Option<SslError> {
-        match self.get_credentials_handle() {
-            Some(x) => return Some(x),
-            None => {}
-        };
-        match self.initialize_ssl_context() {
-            Some(x) => return Some(x),
-            None => {}
-        };
-        match self.do_handshake() {
-            Some(x) => return Some(x),
-            None => {}
-        };
-        return None
+    #[inline]
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stream.flush()
     }
 }
 
-impl<'a, S> Drop for SslStream<'a, S>
+impl Drop for SchannelCredHandle
 {
     fn drop(&mut self) {
         unsafe {
-            assert!(DeleteSecurityContext(&mut self.ctxt as *mut CtxtHandle) == SEC_E_OK);
-            assert!(FreeCredentialsHandle(&mut self.cred_handle as *mut CredHandle) == SEC_E_OK);
+            assert!(FreeCredentialsHandle(&mut self.0 as *mut CredHandle) == SEC_E_OK);
+        }
+    }
+}
+
+impl Drop for SchannelCtxtHandle
+{
+    fn drop(&mut self) {
+        unsafe {
+            assert!(DeleteSecurityContext(&mut self.0 as *mut CtxtHandle) == SEC_E_OK);
+        }
+    }
+}
+
+impl Drop for SchannelCertStore
+{
+    fn drop(&mut self) {
+        unsafe {
+            println!("freeee cert_store");
+            assert!(CertCloseStore(self.0, 0) == 1);
+        }
+    }
+}
+
+impl Drop for SchannelCertCtxt
+{
+    fn drop(&mut self) {
+        unsafe {
+            println!("freeee cert_ctxt");
+            CertFreeCertificateContext(self.0);
         }
     }
 }
