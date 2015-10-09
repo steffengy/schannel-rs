@@ -1,8 +1,12 @@
 [package]
 
 name = "schannel"
+license = "MIT"
 version = "0.0.1"
+description = "Schannel bindings for rust, allowing https without openssl, with hyper integration"
 authors = [ "steffenb198@aol.com" ]
+readme = "README.md"
+keywords = ["windows", "schannel", "win32", "ssl", "https", "hyper"]
 
 [lib]
 name = "schannel"

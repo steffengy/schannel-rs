@@ -1,6 +1,6 @@
+#![cfg(feature = "hyper")]
 extern crate schannel;
 
-#[cfg(feature = "hyper")]
 extern crate hyper;
 #[macro_use]
 extern crate log;
@@ -18,7 +18,6 @@ use hyper::server::{Request, Response};
 use schannel::*;
 use schannel::hyperimpl::Schannel as HyperSchannel;
 
-#[cfg(feature = "hyper")]
 #[test]
 fn test_hyper_client()
 {
@@ -46,7 +45,6 @@ fn test_hyper_client()
     assert!(body.contains("Google"));
 }
 
-#[cfg(feature = "hyper")]
 #[test]
 fn test_hyper_server()
 {

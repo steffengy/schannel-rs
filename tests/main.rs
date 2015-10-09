@@ -9,7 +9,6 @@ use std::time::Duration;
 use std::thread;
 
 use schannel::*;
-use schannel::hyperimpl::Schannel as HyperSchannel;
 
 #[test]
 fn test_client() 
