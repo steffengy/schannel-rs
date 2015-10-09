@@ -186,14 +186,14 @@ impl SslInfoServer
             SslCertStore::User => CERT_SYSTEM_STORE_USERS,
             SslCertStore::LocalMachine => CERT_SYSTEM_STORE_LOCAL_MACHINE,
         } | CERT_STORE_READONLY_FLAG;
-        let store_name = OsStr::new("MY").encode_wide().chain(Some(0)).collect::<Vec<_>>().as_mut_ptr();
+        let mut store_name = OsStr::new("My").encode_wide().chain(Some(0)).collect::<Vec<_>>();
         let handle = unsafe { 
             CertOpenStore(
                 CERT_STORE_PROV_SYSTEM as *mut i8,
                 0,
                 0,
                 store_location,
-                store_name as *mut c_void
+                store_name.as_mut_ptr() as *mut c_void
             )
         };
         if handle == ptr::null_mut() {
@@ -201,12 +201,14 @@ impl SslInfoServer
         }
 
         let mut find_param;
+        let mut find_param_data: Arc<_>;
         let mut find_param_ptr = ptr::null_mut();
         
         let find_type = match cond {
             SslCertCondition::SHA1HashIdentical { hash } => {
                 let mut sha1_hash = hash.from_hex().unwrap();
-                find_param = CRYPT_HASH_BLOB { cbData: sha1_hash.len() as u32, pbData: sha1_hash.as_mut_ptr() };
+                find_param_data = Arc::new(sha1_hash);
+                find_param = CRYPT_HASH_BLOB { cbData: find_param_data.len() as u32, pbData: (*find_param_data).as_ptr() as *mut u8 };
                 find_param_ptr = &mut find_param as *mut _ as *mut c_void;
                 CERT_FIND_SHA1_HASH
             }
@@ -698,7 +700,6 @@ impl Drop for SchannelCertStore
 {
     fn drop(&mut self) {
         unsafe {
-            println!("freeee cert_store");
             assert!(CertCloseStore(self.0, 0) == 1);
         }
     }
@@ -708,7 +709,6 @@ impl Drop for SchannelCertCtxt
 {
     fn drop(&mut self) {
         unsafe {
-            println!("freeee cert_ctxt");
             CertFreeCertificateContext(self.0);
         }
     }
