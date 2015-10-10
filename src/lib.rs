@@ -45,8 +45,10 @@ pub const CERT_STORE_READONLY_FLAG: DWORD = 0x00008000;
 
 pub const CERT_COMPARE_SHA1_HASH: DWORD = 1;
 pub const CERT_COMPARE_SHIFT: DWORD = 16;
+pub const CERT_COMPARE_NAME_STR_W: DWORD = 8;
 
 pub const CERT_FIND_SHA1_HASH: DWORD = CERT_COMPARE_SHA1_HASH << CERT_COMPARE_SHIFT;
+pub const CERT_FIND_SUBJECT_STR: DWORD = CERT_COMPARE_NAME_STR_W << CERT_COMPARE_SHIFT | CERT_INFO_SUBJECT_FLAG;
 
 // TODO: General error handling and checks (if initialized for credential, stream_sizes, ...)
 // TODO: renegotiation, disconnect
@@ -100,7 +102,16 @@ pub enum SslCertStore
 
 pub enum SslCertCondition
 {
-    SHA1HashIdentical { hash: String }
+    SHA1HashIdentical(String),
+    SubjectContains(String)
+}
+
+/// internal, type of the value passed to the API to prevent the data from going out of scope
+enum SslCertConditionValue
+{
+    None,
+    U8Vector(Vec<u8>),
+    U16Vector(Vec<u16>)
 }
 
 /// SSL wrapper for generic streams
@@ -133,14 +144,14 @@ pub enum SslError
     CertificationStoreOpenFailed,
     CertNotFound,
     IoError(std::io::Error),
-    UnknownError { err_code: i32 }
+    UnknownError(i32)
 }
 
 impl Display for SslError
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            SslError::UnknownError{err_code: err_code} => write!(f, "An unknown error with code({}) occurred", err_code),
+            SslError::UnknownError(err_code) => write!(f, "An unknown error with code({}) occurred", err_code),
             _ => write!(f, "{:?}", self)
         }
     }
@@ -172,8 +183,17 @@ macro_rules! map_security_error {
             // Errors which are releated to an invalid version or unsupported cipher
             SEC_E_UNSUPPORTED_FUNCTION|
             SEC_E_ALGORITHM_MISMATCH                  => SslError::VersionCipherMismatch,
-            _                                         => SslError::UnknownError { err_code: $x }
+            _                                         => SslError::UnknownError($x)
         })
+}
+
+// Extract a value from an enum, ignoring default values and mapping to 0 pointer (since that case cannot occur when this is used)
+macro_rules! match_ptr_ignore {
+    ($st:expr, $($pat:pat => $result:expr),*) => (match $st {
+        $($pat => $result),*,
+        // This case cannot happen since when this macro is used, only cases in $matches are possible -> silence the compiler
+        _ => 0 as *mut _
+    })
 }
 
 impl SslInfoServer
@@ -201,16 +221,30 @@ impl SslInfoServer
         }
 
         let mut find_param;
-        let mut find_param_data: Arc<_>;
+        let mut find_param_data: SslCertConditionValue;
         let mut find_param_ptr = ptr::null_mut();
         
         let find_type = match cond {
-            SslCertCondition::SHA1HashIdentical { hash } => {
-                let mut sha1_hash = hash.from_hex().unwrap();
-                find_param_data = Arc::new(sha1_hash);
-                find_param = CRYPT_HASH_BLOB { cbData: find_param_data.len() as u32, pbData: (*find_param_data).as_ptr() as *mut u8 };
+            SslCertCondition::SHA1HashIdentical(hash) => {
+                find_param_data = SslCertConditionValue::U8Vector(hash.from_hex().unwrap());
+                let mut sha1_len: u32 = 0;
+                let sha1_hash = match_ptr_ignore!(find_param_data,
+                    SslCertConditionValue::U8Vector(ref mut hash) => {
+                        sha1_len = hash.len() as u32;
+                        hash.as_mut_ptr()
+                    }
+                );
+                find_param = CRYPT_HASH_BLOB { cbData: sha1_len, pbData: sha1_hash };
                 find_param_ptr = &mut find_param as *mut _ as *mut c_void;
                 CERT_FIND_SHA1_HASH
+            },
+            SslCertCondition::SubjectContains(name) => {
+                find_param_data = SslCertConditionValue::U16Vector(OsStr::new(&name).encode_wide().chain(Some(0)).collect::<Vec<_>>());
+                let unicode_name = match_ptr_ignore!(find_param_data, 
+                    SslCertConditionValue::U16Vector(ref mut name) => name.as_mut_ptr()
+                );
+                find_param_ptr = unicode_name as *mut c_void;
+                CERT_FIND_SUBJECT_STR
             }
         };
 
@@ -268,9 +302,12 @@ impl<S: Read + Write> SslStream<S>
         let ssl_info = &*self.info;
         let mut cert_amount: DWORD = 0;
 
-        let mut flags = SCH_CRED_NO_DEFAULT_CREDS;
+        let mut flags = 0;
+
+        let mut certs; 
         let cert_ctxts = match ssl_info {
             &SslInfo::Client(ref info) => {
+                flags = SCH_CRED_NO_DEFAULT_CREDS;
                 if info.disable_peer_verification {
                     flags |= SCH_CRED_MANUAL_CRED_VALIDATION;
                 } else {
@@ -280,7 +317,8 @@ impl<S: Read + Write> SslStream<S>
             }
             &SslInfo::Server(ref info) => {
                 cert_amount = 1;
-                [info.cert_ctxt.0].as_ptr() as *mut *const CERT_CONTEXT
+                certs = [info.cert_ctxt.0];
+                certs.as_mut_ptr() as *mut *const CERT_CONTEXT
             }
         };
 
@@ -307,9 +345,10 @@ impl<S: Read + Write> SslStream<S>
         };
 
         let cred_handle = get_mut_handle!(self, cred_handle);
+        let mut sec_package = OsStr::new(UNISP_NAME).encode_wide().chain(Some(0)).collect::<Vec<_>>();
         let status = unsafe { secur32::AcquireCredentialsHandleW(
                 ptr::null_mut(),
-                OsStr::new(UNISP_NAME).encode_wide().chain(Some(0)).collect::<Vec<_>>().as_mut_ptr(),
+                sec_package.as_mut_ptr(),
                 cred_use,
                 ptr::null_mut(),
                 &mut creds as *mut _ as *mut c_void,

@@ -1,5 +1,9 @@
 extern crate schannel;
 
+#[macro_use]
+extern crate log;
+extern crate env_logger;
+
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
@@ -39,7 +43,7 @@ fn test_server()
     return;
     let listener = TcpListener::bind("127.0.0.1:8443").unwrap();
     // Fetch a certificate from HKLM by the SHA1 fingerprint, in this case only works for my local development machine IIS-express test certificate
-    let server_info = SslInfoServer::new(SslCertStore::LocalMachine, SslCertCondition::SHA1HashIdentical { hash: "25f0fb4a3b81da7d41b0a3f90eebf9ca5eaefd17".to_owned() }).unwrap();
+    let server_info = SslInfoServer::new(SslCertStore::LocalMachine, SslCertCondition::SubjectContains("localhost".to_owned())).unwrap();
     let info = Arc::new(SslInfo::Server(server_info));
 
     for stream in listener.incoming() {

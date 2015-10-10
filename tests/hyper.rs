@@ -50,7 +50,7 @@ fn test_hyper_server()
 {
     env_logger::init().unwrap();
     // Fetch a certificate from HKLM by the SHA1 fingerprint, in this case only works for my local development machine IIS-express test certificate
-    let server_info = SslInfoServer::new(SslCertStore::LocalMachine, SslCertCondition::SHA1HashIdentical { hash: "25f0fb4a3b81da7d41b0a3f90eebf9ca5eaefd17".to_owned() }).unwrap();
+    let server_info = SslInfoServer::new(SslCertStore::LocalMachine, SslCertCondition::SubjectContains("localhost".to_owned())).unwrap();
     let wrapper = HyperSchannel {
         info: Arc::new(SslInfo::Server(server_info))
     };
