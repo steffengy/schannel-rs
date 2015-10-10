@@ -2,6 +2,8 @@ environment:
   matrix:
   - TARGET: x86_64-pc-windows-msvc
   - TARGET: i686-pc-windows-msvc
+  access_token:
+    secure: ZxcrtxQXwszRYNN6c1ZIagczEqzmQQZeYHY58izcmF0jdq/cptxJvFUoVxDmnoqj
 install:
   - ps: New-SelfSignedCertificate -DnsName localhost -CertStoreLocation cert:Localmachine\My
   - ps: Start-FileDownload "https://static.rust-lang.org/dist/rust-nightly-${env:TARGET}.exe" -FileName "rust-nightly.exe"
@@ -9,8 +11,26 @@ install:
   - ps: $env:PATH="$env:PATH;C:\rust\bin"
   - rustc -vV
   - cargo -vV
+  - echo install
 build_script:
-  - cargo build
-  - cargo package
+  - if "%TARGET%" == "x86_64-pc-windows-msvc" ( cargo doc --no-deps )
+  - echo build
 test_script:
   - cargo test
+after_deploy:
+  - ps: Add-Content "$env:USERPROFILE\.git-credentials" "https://$($env:access_token):x-oauth-basic@github.com`n"
+  - set deploy=1
+  - if not "%APPVEYOR_REPO_NAME%" == "steffengy/rust-schannel" ( set deploy=0 )
+  - if not "%APPVEYOR_REPO_BRANCH%" == "master" ( set deploy=0 )
+  - if defined APPVEYOR_PULL_REQUEST_NUMBER ( set deploy=0 )
+  - if not exist "target\doc" ( set deploy=0 )
+  - git config --global credential.helper store
+  - git config --global user.name "Appveyor Worker"
+  - git config --global user.email "<>"
+  - if "%deploy"=="1" ( move target\doc ..\doc )
+  - git checkout gh-pages
+  - rd /s /q doc
+  - if "%deploy"=="1" ( move ..\doc doc )
+  - git add -A doc
+  - git commit -am "Appveyor: Autoupdate documentation for #%APPVEYOR_REPO_COMMIT%" &
+  - if "%deploy"=="1" ( git push origin gh-pages )
