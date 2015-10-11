@@ -66,7 +66,9 @@ pub struct SchannelCtxtHandle(CtxtHandle);
 
 #[derive(Debug)]
 pub enum SslInfo {
+    /// Configuration related to SSL clients
     Client(SslInfoClient),
+    /// Configuration related to SSL servers
     Server(SslInfoServer)
 }
 
@@ -100,9 +102,12 @@ pub enum SslCertStore
     User
 }
 
+/// SSL certificate conditions
 pub enum SslCertCondition
 {
+    /// Check if the sha1 thumbprint hash of a certificate matches a given string
     SHA1HashIdentical(String),
+    /// Check if the subject name contains a given string
     SubjectContains(String)
 }
 

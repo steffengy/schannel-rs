@@ -27,10 +27,10 @@ after_deploy:
   - git config --global credential.helper store
   - git config --global user.name "Appveyor Worker"
   - git config --global user.email "<>"
-  - if "%deploy"=="1" ( move target\doc ..\doc )
+  - if "%deploy%"=="1" ( move target\doc ..\doc )
   - git checkout gh-pages
   - rd /s /q doc
-  - if "%deploy"=="1" ( move ..\doc doc )
+  - if "%deploy%"=="1" ( move ..\doc doc )
   - git add -A doc
-  - git commit -am "Appveyor: Autoupdate documentation for #%APPVEYOR_REPO_COMMIT%" &
-  - if "%deploy"=="1" ( git push origin gh-pages )
+  - 'git commit -am "Appveyor: Autoupdate documentation for %APPVEYOR_REPO_COMMIT%"'
+  - if "%deploy%"=="1" ( git push origin gh-pages )
