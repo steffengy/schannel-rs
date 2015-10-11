@@ -32,5 +32,5 @@ after_deploy:
   - rd /s /q doc
   - if "%deploy%"=="1" ( move ..\doc doc )
   - git add -A doc
-  - 'git commit -am "Appveyor: Autoupdate documentation for %APPVEYOR_REPO_COMMIT%"'
-  - if "%deploy%"=="1" ( git push origin gh-pages )
+  - 'git commit -am "Appveyor: Autoupdate documentation for %APPVEYOR_REPO_COMMIT%" & ver > nul'
+  - 'if "%deploy%"=="1" ( git push origin gh-pages & ver > nul )'
