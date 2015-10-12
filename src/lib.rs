@@ -17,6 +17,7 @@ pub mod hyperimpl;
 use std::error::Error;
 use std::fmt::{self, Display};
 use std::io::prelude::*;
+use std::io::Error as IoError;
 use std::ptr;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
@@ -51,18 +52,17 @@ pub const CERT_FIND_SHA1_HASH: DWORD = CERT_COMPARE_SHA1_HASH << CERT_COMPARE_SH
 pub const CERT_FIND_SUBJECT_STR: DWORD = CERT_COMPARE_NAME_STR_W << CERT_COMPARE_SHIFT | CERT_INFO_SUBJECT_FLAG;
 
 // TODO: General error handling and checks (if initialized for credential, stream_sizes, ...)
-// TODO: renegotiation, disconnect
-// TODO: Manual certificate validation, respect disable_peer_verification
-// TODO: Find out while sometimes certificate loading fails
+// TODO: renegotiation, disconnect?
+// TODO: Manual certificate validation
 
 #[derive(Debug)]
-pub struct SchannelCertStore(*mut c_void);
+struct SchannelCertStore(*mut c_void);
 #[derive(Debug)]
-pub struct SchannelCertCtxt(*const winapi::wincrypt::CERT_CONTEXT);
+struct SchannelCertCtxt(*const winapi::wincrypt::CERT_CONTEXT);
 #[derive(Debug)]
-pub struct SchannelCredHandle(CredHandle);
+struct SchannelCredHandle(CredHandle);
 #[derive(Debug)]
-pub struct SchannelCtxtHandle(CtxtHandle);
+struct SchannelCtxtHandle(CtxtHandle);
 
 #[derive(Debug)]
 pub enum SslInfo {
@@ -680,6 +680,10 @@ impl<S: Read + Write> Write for SslStream<S>
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() }
         ];
         let mut message = SecBufferDesc { ulVersion: SECBUFFER_VERSION, cBuffers: 4, pBuffers: &mut buffers[0] as *mut SecBuffer };
+
+        if self.stream_sizes.cbHeader == 0 {
+            return Err(IoError::new(std::io::ErrorKind::Other, "SSLStream doesn't seem initialized. Maybe you forgot to call .init?"));
+        }
 
         let mut buffer = vec![0 as u8; self.stream_sizes.cbHeader as usize];
         buffer.extend(buf.iter().cloned());

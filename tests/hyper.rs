@@ -7,11 +7,11 @@ extern crate log;
 extern crate env_logger;
 
 use std::sync::Arc;
-use std::io::{Read, Write};
+use std::io::{Read};
 use std::thread;
 
 use hyper::{Client, Server};
-use hyper::header::{Connection, Headers, UserAgent};
+use hyper::header::{Connection, UserAgent};
 use hyper::net::HttpsConnector;
 use hyper::server::{Request, Response};
 

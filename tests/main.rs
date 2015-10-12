@@ -8,9 +8,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::sync::Arc;
-use std::net::{SocketAddr, Shutdown};
 use std::time::Duration;
-use std::thread;
 
 use schannel::*;
 
