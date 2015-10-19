@@ -8,7 +8,7 @@ authors = [ "Steffen Butzer <steffen.butzer@outlook.com>" ]
 documentation = "http://steffengy.github.io/rust-schannel/doc/schannel/"
 repository = "https://github.com/steffengy/rust-schannel"
 readme = "README.md"
-keywords = ["windows", "schannel", "win32", "ssl", "tls", "https", "hyper"]
+keywords = ["windows", "schannel", "tls", "https", "hyper"]
 
 [lib]
 name = "schannel"
@@ -18,11 +18,11 @@ bench = false
 
 [dependencies]
 rustc-serialize = "0.3"
-hyper = { version = "*", optional = true, default-features = false }
+hyper = { version = "0.6", optional = true, default-features = false }
 log = "0.3"
-winapi = "*"
-secur32-sys="*"
-crypt32-sys="*"
+winapi = "0.2"
+secur32-sys="0.2"
+crypt32-sys="0.2"
 
 [dev-dependencies]
 env_logger = "*"
