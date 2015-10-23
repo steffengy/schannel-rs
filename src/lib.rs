@@ -130,8 +130,8 @@ pub struct SslStream<S>
     ctxt: Arc<SchannelCtxtHandle>,
     cred_handle: Arc<SchannelCredHandle>,
     stream_sizes: SecPkgContext_StreamSizes,
-    read_buf: Option<Vec<u8>>,
-    read_buf_raw: Option<Vec<u8>>
+    read_buf: Vec<u8>,
+    read_buf_raw: Vec<u8>
 }
 
 /// Possible errors which can occur when doing SSL operations (e.g. schannel failure)
@@ -288,8 +288,8 @@ impl<S: Read + Write> SslStream<S>
             info: ssl_info.clone(),
             target_name: None,
             stream_sizes: SecPkgContext_StreamSizes { cbHeader: 0, cbTrailer: 0, cbMaximumMessage: 0, cBuffers: 0, cbBlockSize: 0 },
-            read_buf: None,
-            read_buf_raw: None,
+            read_buf: Vec::new(),
+            read_buf_raw: Vec::new(),
             ctxt: Arc::new(SchannelCtxtHandle(CtxtHandle { dwLower: 0, dwUpper: 0 })),
             cred_handle: Arc::new(SchannelCredHandle(CredHandle { dwLower: 0, dwUpper: 0 }))
         };
@@ -546,24 +546,21 @@ impl<S: Read + Write> Read for SslStream<S>
         let mut message = SecBufferDesc { ulVersion: SECBUFFER_VERSION, cBuffers: 4, pBuffers: &mut buffers[0] as *mut SecBuffer};
 
         // If we have some data in the buffer already, fetch as much as we might need
-        if self.read_buf != None {
-            // Already write the amount we need into our dst buffer
+        if self.read_buf.len() > 0 {
             let iterator_len;
             let available_len;
             {
-                let rbuf = self.read_buf.as_mut().unwrap();
-                available_len = rbuf.len();
-                let iterator = rbuf.iter().take(dst.len());
+                available_len = self.read_buf.len();
+                let iterator = self.read_buf.iter().take(dst.len());
                 iterator_len = iterator.len();
                 dst_vec.extend(iterator);
                 data_left -= iterator_len;
             }
             // Make sure we do not read the same data multiple times
             if iterator_len < available_len {
-                let vec: Vec<_> = self.read_buf.as_mut().unwrap()[iterator_len..].to_vec();
-                self.read_buf = Some(vec);
+                self.read_buf = self.read_buf[iterator_len..].to_vec();
             } else {
-                self.read_buf = None;
+                self.read_buf.clear();
             }
         }
 
@@ -573,32 +570,32 @@ impl<S: Read + Write> Read for SslStream<S>
 
         let ctxt = get_mut_handle!(self, ctxt);
 
+        let mut buf = vec![0 as u8; 0];
         loop 
         {
-            let mut buf = vec![0 as u8; 0];
-
-            // If we have some raw data stored to decrypt, fetch it
-            if self.read_buf_raw != None
-            {
-                let read_buf_data = self.read_buf_raw.as_mut().unwrap().clone();
-                buf.extend(&read_buf_data[..]);
-                debug!("[EXTRA] read {}", read_buf_data.len());
+            if data_left == 0 {
+                break;
             }
 
-            let mut i_read_buf = vec![0 as u8; 512 + data_left];
+            // If we have some raw data stored to decrypt, fetch it
+            if self.read_buf_raw.len() > 0
+            {
+                buf.extend(&self.read_buf_raw[..]); //is a .clone() necessary here?
+                debug!("[EXTRA] read {}", self.read_buf_raw.len());
+                self.read_buf_raw.clear();
+            }
+
+            let mut i_read_buf = vec![0 as u8; 8192];
             let bytes = self.stream.read(&mut i_read_buf).unwrap(); //Error Handling TODO
             if bytes > 0 {
                 buf.extend(&i_read_buf[..bytes]);
             }
 
             if bytes + buf.len() == 0 {
-                if data_left > 0 {
-                    break;
-                }
+                //TODO: store unused buf data on break (read_buf_raw)
                 break;
             }
-            self.read_buf_raw = None;
-
+            
             buffers[0].pvBuffer = buf.as_mut_ptr() as *mut c_void; 
             buffers[0].cbBuffer = buf.len() as u32;
             buffers[0].BufferType = SECBUFFER_DATA;
@@ -608,16 +605,19 @@ impl<S: Read + Write> Read for SslStream<S>
             buffers[3].BufferType = SECBUFFER_EMPTY;
             unsafe {
                 status = DecryptMessage(ctxt as *mut SecHandle, &mut message as *mut SecBufferDesc, 0, ptr::null_mut());
-                debug!("decrypt status: {}", status);
+                debug!("decrypt status: {} -> {}", buf.len(), status);
 
                 // Store extra data (not decrypted yet = raw), if available
+                if status == SEC_E_INCOMPLETE_MESSAGE {
+                    continue;
+                }
+                buf.clear();
+
                 match buffers.iter().find(|&buf| buf.BufferType == SECBUFFER_EXTRA) {
                     Some(extra_buf) => {
                         let extra_buf = std::slice::from_raw_parts(extra_buf.pvBuffer as *mut u8, extra_buf.cbBuffer as usize);
                         debug!("[EXTRA] store {}", extra_buf.len());
-                        let mut vec: Vec<u8> = Vec::new();
-                        vec.extend(extra_buf);
-                        self.read_buf_raw = Some(vec);                        
+                        self.read_buf_raw.extend(extra_buf);                        
                     },
                     None => ()
                 }
@@ -635,19 +635,12 @@ impl<S: Read + Write> Read for SslStream<S>
 
                         // store additional decrypted data
                         if data_buffer.len() > iterator_len {
-                            if self.read_buf == None {
-                                let vec: Vec<u8> = Vec::new();
-                                self.read_buf = Some(vec);
-                            }
-                            self.read_buf.as_mut().unwrap().extend(data_buffer.iter().skip(iterator_len));
-                            debug!("read_buf: {} bytes", self.read_buf.as_mut().unwrap().len());
+                            self.read_buf.extend(data_buffer.iter().skip(iterator_len));
+                            debug!("read_buf: {} bytes", self.read_buf.len());
                         }
-                        //println!("\n\nContent ({}) \n\n{}", len, std::str::from_utf8(&dst[..len]).unwrap());
+                        //println!("\n\nContent ({}) \n\n{}", iterator_len, std::str::from_utf8(&dst[..dst.len()-data_left]).unwrap());
 
                         buf.clear();
-                        if data_left != dst.len() {
-                            break
-                        }
                     },
                     None => {
                         debug!("No data buffer, incomplete: {}", status == SEC_E_INCOMPLETE_MESSAGE)
