@@ -613,11 +613,13 @@ impl<S: Read + Write> Read for SslStream<S>
                 }
                 buf.clear();
 
+                let mut expecting_more = false;
                 match buffers.iter().find(|&buf| buf.BufferType == SECBUFFER_EXTRA) {
                     Some(extra_buf) => {
                         let extra_buf = std::slice::from_raw_parts(extra_buf.pvBuffer as *mut u8, extra_buf.cbBuffer as usize);
                         debug!("[EXTRA] store {}", extra_buf.len());
-                        self.read_buf_raw.extend(extra_buf);                        
+                        self.read_buf_raw.extend(extra_buf);     
+                        expecting_more = true;                   
                     },
                     None => ()
                 }
@@ -639,13 +641,16 @@ impl<S: Read + Write> Read for SslStream<S>
                             debug!("read_buf: {} bytes", self.read_buf.len());
                         }
                         //println!("\n\nContent ({}) \n\n{}", iterator_len, std::str::from_utf8(&dst[..dst.len()-data_left]).unwrap());
-
                         buf.clear();
                     },
                     None => {
                         debug!("No data buffer, incomplete: {}", status == SEC_E_INCOMPLETE_MESSAGE)
                     }
                 };
+
+                if !expecting_more {
+                    break;
+                }
             }
         }
 
