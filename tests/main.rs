@@ -15,7 +15,7 @@ use schannel::*;
 #[test]
 fn test_client() 
 {
-    let info = Arc::new(SslInfo::Client(SslInfoClient { disable_peer_verification: false }));
+    let info = Arc::new(SslInfo::Client(SslInfoClient::new()));
     let tcp_stream = TcpStream::connect("google.com:443").unwrap();
     tcp_stream.set_read_timeout(Some(Duration::from_millis(250)));
 

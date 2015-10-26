@@ -18,10 +18,17 @@ use hyper::server::{Request, Response};
 use schannel::*;
 use schannel::hyperimpl::Schannel as HyperSchannel;
 
+fn get_insecure_client_info() -> SslInfoClient
+{
+    let mut info = SslInfoClient::new();
+    info.disable_peer_verification = true;
+    return info;
+}
+
 #[test]
 fn test_hyper_client()
 {
-    let info = SslInfo::Client(SslInfoClient { disable_peer_verification: false });
+    let info = SslInfo::Client(SslInfoClient::new());
     let client = Client::with_connector(
         HttpsConnector::new(
             HyperSchannel {
@@ -60,7 +67,7 @@ fn test_hyper_server()
     }).unwrap();
 
     // Integration test for our client (disabled certificate check for now)
-    let client_info = SslInfo::Client(SslInfoClient { disable_peer_verification: true });
+    let client_info = SslInfo::Client(get_insecure_client_info());
     let client = Client::with_connector(
         HttpsConnector::new(
             HyperSchannel {

@@ -77,13 +77,31 @@ pub enum SslInfo {
 pub struct SslInfoClient
 {
     /// Whether to validate the peer certificate
-    pub disable_peer_verification: bool
+    pub disable_peer_verification: bool,
+    /// Whether to check for certificate revocation
+    pub disable_revocation_check: bool,
+    /// The allowed SSL versions
+    pub ssl_version: SslVersion
+}
+
+impl SslInfoClient
+{
+    /// Get defaults for client configuration
+    pub fn new() -> SslInfoClient {
+        return SslInfoClient { 
+            disable_peer_verification: false,
+            disable_revocation_check: false,
+            ssl_version: SslVersion::Tls1
+        }
+    }
 }
 
 /// SSL wrapper configuration, which only applies to SSL peers/servers
 #[derive(Debug)]
 pub struct SslInfoServer
 {
+    /// The allowed SSL versions
+    pub ssl_version: SslVersion,
     cert_store: Arc<SchannelCertStore>,
     cert_ctxt: Arc<SchannelCertCtxt>
 }
@@ -152,6 +170,35 @@ pub enum SslError
     UnknownError(i32)
 }
 
+#[derive(Debug)]
+pub enum SslVersion
+{
+    /// Allow any SSL version
+    All,
+    /// Allow every SSL version, which is atleast TLSv1 (default)
+    Tls1,
+    Tls10,
+    Tls11,
+    Tls12,
+    Ssl2,
+    Ssl3
+}
+
+impl SslVersion
+{
+    fn get_winapi_flags(&self) -> DWORD {
+        match *self {
+            SslVersion::All   => SP_PROT_ALL,
+            SslVersion::Tls1  => SP_PROT_TLS1 | SP_PROT_TLS1_0 | SP_PROT_TLS1_1 | SP_PROT_TLS1_2,
+            SslVersion::Tls10 => SP_PROT_TLS1_0,
+            SslVersion::Tls11 => SP_PROT_TLS1_1,
+            SslVersion::Tls12 => SP_PROT_TLS1_2,
+            SslVersion::Ssl2  => SP_PROT_SSL2,
+            SslVersion::Ssl3  => SP_PROT_SSL3
+        }
+    }
+}
+
 impl Display for SslError
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -165,7 +212,21 @@ impl Display for SslError
 impl Error for SslError
 {
     fn description(&self) -> &str {
-        "TODO SSL Error occurred"
+        match *self {
+            SslError::CertCommonNameInvalid => "server certificate error",
+            SslError::CertAuthorityInvalid => "certificate chain error [invalid ca]",
+            SslError::CertExpired => "certificate expired",
+            SslError::CertRevoced => "certificate revoced",
+            SslError::CertInvalid => "certificate invalid",
+            SslError::ProtocolError => "internal error",
+            SslError::VersionCipherMismatch => "insufficient security",
+            SslError::HandshakeFailedNoStreamSizes => "received no stream information",
+            SslError::CertificationStoreOpenFailed => "could not open the certificate store [permissions?]",
+            SslError::CertNotFound => "certificate not found",
+            SslError::IoError(_) => "i/o error occured",
+            // This should never happen, since it should be handled separately (as in SslError::fmt)
+            SslError::UnknownError(_) => "???"
+        }
     }
 
     fn cause(&self) -> Option<&Error> {
@@ -268,7 +329,8 @@ impl SslInfoServer
         }
         return Ok(SslInfoServer {
             cert_store: Arc::new(SchannelCertStore(handle)),
-            cert_ctxt: Arc::new(SchannelCertCtxt(ctxt))
+            cert_ctxt: Arc::new(SchannelCertCtxt(ctxt)),
+            ssl_version: SslVersion::Tls1
         })
     }
 }
@@ -307,9 +369,10 @@ impl<S: Read + Write> SslStream<S>
         let ssl_info = &*self.info;
         let mut cert_amount: DWORD = 0;
 
+        let mut ssl_version = SslVersion::Tls1.get_winapi_flags();
         let mut flags = 0;
 
-        let mut certs; 
+        let mut certs;
         let cert_ctxts = match ssl_info {
             &SslInfo::Client(ref info) => {
                 flags = SCH_CRED_NO_DEFAULT_CREDS;
@@ -318,18 +381,25 @@ impl<S: Read + Write> SslStream<S>
                 } else {
                     flags |= SCH_CRED_AUTO_CRED_VALIDATION;
                 }
+                if info.disable_revocation_check {
+                    flags |= SCH_CRED_IGNORE_NO_REVOCATION_CHECK | SCH_CRED_IGNORE_REVOCATION_OFFLINE;
+                } else {
+                    flags |= SCH_CRED_REVOCATION_CHECK_CHAIN;
+                }
+                ssl_version = info.ssl_version.get_winapi_flags();
                 ptr::null_mut()
             }
             &SslInfo::Server(ref info) => {
                 cert_amount = 1;
                 certs = [info.cert_ctxt.0];
+                ssl_version = info.ssl_version.get_winapi_flags();
                 certs.as_mut_ptr() as *mut *const CERT_CONTEXT
             }
         };
 
         let mut creds = SCHANNEL_CRED { 
             dwVersion: SCHANNEL_CRED_VERSION,
-            grbitEnabledProtocols: SP_PROT_ALL,
+            grbitEnabledProtocols: ssl_version,
             dwFlags: flags,
             dwCredFormat: 0,
             aphMappers: ptr::null_mut(),
