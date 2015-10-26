@@ -81,7 +81,7 @@ pub struct SslInfoClient
     /// Whether to check for certificate revocation
     pub disable_revocation_check: bool,
     /// The allowed SSL versions
-    pub ssl_version: SslVersion
+    pub ssl_method: SslMethod
 }
 
 impl SslInfoClient
@@ -91,7 +91,7 @@ impl SslInfoClient
         return SslInfoClient { 
             disable_peer_verification: false,
             disable_revocation_check: false,
-            ssl_version: SslVersion::Tls1
+            ssl_method: SslMethod::Tlsv1_X
         }
     }
 }
@@ -101,7 +101,7 @@ impl SslInfoClient
 pub struct SslInfoServer
 {
     /// The allowed SSL versions
-    pub ssl_version: SslVersion,
+    pub ssl_method: SslMethod,
     cert_store: Arc<SchannelCertStore>,
     cert_ctxt: Arc<SchannelCertCtxt>
 }
@@ -172,30 +172,37 @@ pub enum SslError
 }
 
 #[derive(Debug)]
-pub enum SslVersion
+#[allow(non_camel_case_types)]
+pub enum SslMethod
 {
     /// Allow any SSL version
     All,
     /// Allow every SSL version, which is atleast TLSv1 (default)
-    Tls1,
-    Tls10,
-    Tls11,
-    Tls12,
-    Ssl2,
-    Ssl3
+    Tlsv1_X,
+    Tlsv1,
+    Tlsv1_1,
+    Tlsv1_2,
+    Sslv2,
+    Sslv3,
+    Sslv23,
+    Dtlsv1,
+    Dtlsv1_2
 }
 
-impl SslVersion
+impl SslMethod
 {
     fn get_winapi_flags(&self) -> DWORD {
         match *self {
-            SslVersion::All   => SP_PROT_ALL,
-            SslVersion::Tls1  => SP_PROT_TLS1 | SP_PROT_TLS1_0 | SP_PROT_TLS1_1 | SP_PROT_TLS1_2,
-            SslVersion::Tls10 => SP_PROT_TLS1_0,
-            SslVersion::Tls11 => SP_PROT_TLS1_1,
-            SslVersion::Tls12 => SP_PROT_TLS1_2,
-            SslVersion::Ssl2  => SP_PROT_SSL2,
-            SslVersion::Ssl3  => SP_PROT_SSL3
+            SslMethod::All   => SP_PROT_ALL,
+            SslMethod::Tlsv1_X  => SP_PROT_TLS1 | SP_PROT_TLS1_0 | SP_PROT_TLS1_1 | SP_PROT_TLS1_2,
+            SslMethod::Tlsv1 => SP_PROT_TLS1_0,
+            SslMethod::Tlsv1_1 => SP_PROT_TLS1_1,
+            SslMethod::Tlsv1_2 => SP_PROT_TLS1_2,
+            SslMethod::Sslv2  => SP_PROT_SSL2,
+            SslMethod::Sslv3  => SP_PROT_SSL3,
+            SslMethod::Sslv23 => SP_PROT_SSL2 | SP_PROT_SSL3,
+            SslMethod::Dtlsv1 => SP_PROT_DTLS,
+            SslMethod::Dtlsv1_2 => SP_PROT_DTLS1_X // todo: check this
         }
     }
 }
@@ -289,7 +296,7 @@ impl SslInfoServer
 
         let mut find_param;
         let mut find_param_data: SslCertConditionValue;
-        let mut find_param_ptr = ptr::null_mut();
+        let find_param_ptr;
         
         let find_type = match cond {
             SslCertCondition::SHA1HashIdentical(hash) => {
@@ -331,7 +338,7 @@ impl SslInfoServer
         return Ok(SslInfoServer {
             cert_store: Arc::new(SchannelCertStore(handle)),
             cert_ctxt: Arc::new(SchannelCertCtxt(ctxt)),
-            ssl_version: SslVersion::Tls1
+            ssl_method: SslMethod::Tlsv1_X
         })
     }
 }
@@ -370,7 +377,7 @@ impl<S: Read + Write> SslStream<S>
         let ssl_info = &*self.info;
         let mut cert_amount: DWORD = 0;
 
-        let mut ssl_version = SslVersion::Tls1.get_winapi_flags();
+        let ssl_method;
         let mut flags = 0;
 
         let mut certs;
@@ -387,20 +394,20 @@ impl<S: Read + Write> SslStream<S>
                 } else {
                     flags |= SCH_CRED_REVOCATION_CHECK_CHAIN;
                 }
-                ssl_version = info.ssl_version.get_winapi_flags();
+                ssl_method = info.ssl_method.get_winapi_flags();
                 ptr::null_mut()
             }
             &SslInfo::Server(ref info) => {
                 cert_amount = 1;
                 certs = [info.cert_ctxt.0];
-                ssl_version = info.ssl_version.get_winapi_flags();
+                ssl_method = info.ssl_method.get_winapi_flags();
                 certs.as_mut_ptr() as *mut *const CERT_CONTEXT
             }
         };
 
         let mut creds = SCHANNEL_CRED { 
             dwVersion: SCHANNEL_CRED_VERSION,
-            grbitEnabledProtocols: ssl_version,
+            grbitEnabledProtocols: ssl_method,
             dwFlags: flags,
             dwCredFormat: 0,
             aphMappers: ptr::null_mut(),
@@ -495,7 +502,7 @@ impl<S: Read + Write> SslStream<S>
             let ctxt = get_mut_handle!(self, ctxt);
             let cred_handle = get_mut_handle!(self, cred_handle);
 
-            let mut stored_ctx = match initial {
+            let stored_ctx = match initial {
                 true => ptr::null_mut(),
                 false  => ctxt as *mut _
             };
@@ -637,7 +644,7 @@ impl<S: Read + Write> Read for SslStream<S>
 
         //TODO: maybe handle that as separate reads/more efficiently?
         
-        let mut status = SEC_E_INCOMPLETE_MESSAGE;
+        let mut status;
 
         let ctxt = get_mut_handle!(self, ctxt);
 
