@@ -121,6 +121,7 @@ pub enum SslCertStore
 }
 
 /// SSL certificate conditions
+/// used to load a certificate matching a condition from the windows certificate store
 pub enum SslCertCondition
 {
     /// Check if the sha1 thumbprint hash of a certificate matches a given string
