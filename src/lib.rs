@@ -28,29 +28,6 @@ use secur32::*;
 use crypt32::*;
 use rustc_serialize::hex::{FromHex};
 
-// TODO: Add constants to winapi-rs
-pub const CERT_STORE_PROV_SYSTEM_W: DWORD = 10;
-pub const CERT_STORE_PROV_SYSTEM: DWORD = CERT_STORE_PROV_SYSTEM_W;
-
-pub const CERT_SYSTEM_STORE_LOCATION_SHIFT: DWORD = 16;
-
-pub const CERT_SYSTEM_STORE_CURRENT_USER_ID: DWORD = 1;
-pub const CERT_SYSTEM_STORE_LOCAL_MACHINE_ID: DWORD = 2;
-pub const CERT_SYSTEM_STORE_USERS_ID: DWORD = 6;
-
-pub const CERT_SYSTEM_STORE_CURRENT_USER: DWORD = CERT_SYSTEM_STORE_CURRENT_USER_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT;
-pub const CERT_SYSTEM_STORE_LOCAL_MACHINE: DWORD = CERT_SYSTEM_STORE_LOCAL_MACHINE_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT;
-pub const CERT_SYSTEM_STORE_USERS: DWORD = CERT_SYSTEM_STORE_USERS_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT;
-
-pub const CERT_STORE_READONLY_FLAG: DWORD = 0x00008000;
-
-pub const CERT_COMPARE_SHA1_HASH: DWORD = 1;
-pub const CERT_COMPARE_SHIFT: DWORD = 16;
-pub const CERT_COMPARE_NAME_STR_W: DWORD = 8;
-
-pub const CERT_FIND_SHA1_HASH: DWORD = CERT_COMPARE_SHA1_HASH << CERT_COMPARE_SHIFT;
-pub const CERT_FIND_SUBJECT_STR: DWORD = CERT_COMPARE_NAME_STR_W << CERT_COMPARE_SHIFT | CERT_INFO_SUBJECT_FLAG;
-
 // TODO: General error handling and checks (if initialized for credential, stream_sizes, ...)
 // TODO: renegotiation, disconnect?
 // TODO: Manual certificate validation
@@ -88,7 +65,7 @@ impl SslInfoClient
 {
     /// Get defaults for client configuration
     pub fn new() -> SslInfoClient {
-        return SslInfoClient { 
+        return SslInfoClient {
             disable_peer_verification: false,
             disable_revocation_check: false,
             ssl_method: SslMethod::Tlsv1_X
@@ -140,7 +117,7 @@ enum SslCertConditionValue
 
 /// SSL wrapper for generic streams
 #[derive(Debug, Clone)]
-pub struct SslStream<S> 
+pub struct SslStream<S>
 {
     stream: S,
     info: Arc<SslInfo>,
@@ -281,7 +258,7 @@ impl SslInfoServer
             SslCertStore::LocalMachine => CERT_SYSTEM_STORE_LOCAL_MACHINE,
         } | CERT_STORE_READONLY_FLAG;
         let mut store_name = OsStr::new("My").encode_wide().chain(Some(0)).collect::<Vec<_>>();
-        let handle = unsafe { 
+        let handle = unsafe {
             CertOpenStore(
                 CERT_STORE_PROV_SYSTEM as *mut i8,
                 0,
@@ -297,7 +274,7 @@ impl SslInfoServer
         let mut find_param;
         let mut find_param_data: SslCertConditionValue;
         let find_param_ptr;
-        
+
         let find_type = match cond {
             SslCertCondition::SHA1HashIdentical(hash) => {
                 find_param_data = SslCertConditionValue::U8Vector(hash.from_hex().unwrap());
@@ -314,7 +291,7 @@ impl SslInfoServer
             },
             SslCertCondition::SubjectContains(name) => {
                 find_param_data = SslCertConditionValue::U16Vector(OsStr::new(&name).encode_wide().chain(Some(0)).collect::<Vec<_>>());
-                let unicode_name = match_ptr_ignore!(find_param_data, 
+                let unicode_name = match_ptr_ignore!(find_param_data,
                     SslCertConditionValue::U16Vector(ref mut name) => name.as_mut_ptr()
                 );
                 find_param_ptr = unicode_name as *mut c_void;
@@ -322,9 +299,9 @@ impl SslInfoServer
             }
         };
 
-        let ctxt = unsafe { 
+        let ctxt = unsafe {
             CertFindCertificateInStore(
-                handle, 
+                handle,
                 X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
                 0,
                 find_type,
@@ -348,13 +325,13 @@ macro_rules! get_mut_handle(
     ($self_:ident, $field:ident) => { &(*$self_.$field).0 as *const SecHandle as *mut SecHandle };
 );
 
-impl<S: Read + Write> SslStream<S> 
+impl<S: Read + Write> SslStream<S>
 {
     /// Instantiate a new SSL-stream
     pub fn new(stream: S, ssl_info: &Arc<SslInfo>) -> Result<SslStream<S>, SslError>
     {
-        let ssl_stream = SslStream { 
-            stream: stream, 
+        let ssl_stream = SslStream {
+            stream: stream,
             info: ssl_info.clone(),
             target_name: None,
             stream_sizes: SecPkgContext_StreamSizes { cbHeader: 0, cbTrailer: 0, cbMaximumMessage: 0, cBuffers: 0, cbBlockSize: 0 },
@@ -405,7 +382,7 @@ impl<S: Read + Write> SslStream<S>
             }
         };
 
-        let mut creds = SCHANNEL_CRED { 
+        let mut creds = SCHANNEL_CRED {
             dwVersion: SCHANNEL_CRED_VERSION,
             grbitEnabledProtocols: ssl_method,
             dwFlags: flags,
@@ -439,7 +416,7 @@ impl<S: Read + Write> SslStream<S>
                 ptr::null_mut(),
                 cred_handle as *mut CredHandle,
                 ptr::null_mut()
-            ) 
+            )
         };
 
         if status != SEC_E_OK {
@@ -457,7 +434,7 @@ impl<S: Read + Write> SslStream<S>
                 ISC_REQ_STREAM;
     }
 
-    fn do_handshake(&mut self) -> Option<SslError> 
+    fn do_handshake(&mut self) -> Option<SslError>
     {
         let ssl_info = &*self.info;
         let mut read_buffer = Vec::new();
@@ -568,7 +545,7 @@ impl<S: Read + Write> SslStream<S>
                     unsafe { FreeContextBuffer(out_buffers[0].pvBuffer); }
                 }
             }
-            
+
             if status == SEC_E_INCOMPLETE_MESSAGE {
                 debug!("Incomplete; Continue");
                 continue;
@@ -615,7 +592,7 @@ impl<S: Read + Write> Read for SslStream<S>
         let mut dst_vec: Vec<u8> = Vec::new();
         let mut data_left = dst.len();
 
-        let mut buffers = [ 
+        let mut buffers = [
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
@@ -643,13 +620,13 @@ impl<S: Read + Write> Read for SslStream<S>
         }
 
         //TODO: maybe handle that as separate reads/more efficiently?
-        
+
         let mut status;
 
         let ctxt = get_mut_handle!(self, ctxt);
 
         let mut buf = vec![0 as u8; 0];
-        loop 
+        loop
         {
             if data_left == 0 {
                 break;
@@ -673,8 +650,8 @@ impl<S: Read + Write> Read for SslStream<S>
                 //TODO: store unused buf data on break (read_buf_raw)
                 break;
             }
-            
-            buffers[0].pvBuffer = buf.as_mut_ptr() as *mut c_void; 
+
+            buffers[0].pvBuffer = buf.as_mut_ptr() as *mut c_void;
             buffers[0].cbBuffer = buf.len() as u32;
             buffers[0].BufferType = SECBUFFER_DATA;
 
@@ -696,8 +673,8 @@ impl<S: Read + Write> Read for SslStream<S>
                     Some(extra_buf) => {
                         let extra_buf = std::slice::from_raw_parts(extra_buf.pvBuffer as *mut u8, extra_buf.cbBuffer as usize);
                         debug!("[EXTRA] store {}", extra_buf.len());
-                        self.read_buf_raw.extend(extra_buf);     
-                        expecting_more = true;                   
+                        self.read_buf_raw.extend(extra_buf);
+                        expecting_more = true;
                     },
                     None => ()
                 }
@@ -706,7 +683,7 @@ impl<S: Read + Write> Read for SslStream<S>
                 match buffers.iter().find(|&buf| buf.BufferType == SECBUFFER_DATA) {
                     Some(data_buffer) => {
                         debug!("data length: {}", data_buffer.cbBuffer);
-                        
+
                         let data_buffer = std::slice::from_raw_parts(data_buffer.pvBuffer as *mut u8, data_buffer.cbBuffer as usize);
                         let iterator = data_buffer.iter().take(data_left);
                         let iterator_len = iterator.len();
@@ -749,7 +726,7 @@ impl<S: Read + Write> Write for SslStream<S>
 {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize>
     {
-        let mut buffers = [ 
+        let mut buffers = [
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },

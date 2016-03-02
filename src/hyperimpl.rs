@@ -3,6 +3,7 @@ use hyper::error::Result;
 use hyper::Error as HyperError;
 use std::net::{SocketAddr, Shutdown};
 use std::sync::Arc;
+use std::time::Duration;
 use std::io;
 
 use SslError;
@@ -45,13 +46,11 @@ impl NetworkStream for SslStream<HttpStream> {
         self.stream.0.peer_addr()
     }
 
-    #[cfg(feature = "timeouts")]
     #[inline]
     fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         self.stream.0.set_read_timeout(dur)
     }
 
-    #[cfg(feature = "timeouts")]
     #[inline]
     fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         self.stream.0.set_write_timeout(dur)
