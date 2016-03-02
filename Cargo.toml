@@ -2,7 +2,7 @@
 
 name = "schannel"
 license = "MIT"
-version = "0.0.1"
+version = "0.0.2"
 description = "Schannel bindings for rust, allowing SSL/TLS (e.g. https) without openssl, including hyper integration"
 authors = [ "Steffen Butzer <steffen.butzer@outlook.com>" ]
 documentation = "http://steffengy.github.io/schannel-rs/doc/schannel/"
@@ -25,7 +25,7 @@ secur32-sys="0.2"
 crypt32-sys="0.2"
 
 [dev-dependencies]
-env_logger = "*"
+env_logger = "0.3"
 
 [features]
 default = ["hyper"]
