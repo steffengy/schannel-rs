@@ -349,6 +349,14 @@ impl<S: Read + Write> SslStream<S>
         self.target_name = Some(host.to_owned());
     }
 
+    pub fn get_ref(&self) -> &S {
+        &self.stream
+    }
+
+    pub fn get_mut(&mut self) -> &mut S {
+        &mut self.stream
+    }
+
     fn get_credentials_handle(&mut self) -> Option<SslError>
     {
         let ssl_info = &*self.info;
