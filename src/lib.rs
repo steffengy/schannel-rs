@@ -597,19 +597,9 @@ impl<S: Read + Write> Read for SslStream<S>
 {
     fn read(&mut self, dst: &mut [u8]) -> std::io::Result<usize>
     {
-        let mut dst_vec: Vec<u8> = Vec::new();
-        let mut data_left = dst.len();
-
-        let mut buffers = [
-            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
-            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
-            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
-            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() }
-        ];
-        let mut message = SecBufferDesc { ulVersion: SECBUFFER_VERSION, cBuffers: 4, pBuffers: &mut buffers[0] as *mut SecBuffer};
-
-        // If we have some data in the buffer already, fetch as much as we might need
+        // If we have some data in the buffer already just return it.
         if self.read_buf.len() > 0 {
+            let mut dst_vec: Vec<u8> = Vec::new();
             let iterator_len;
             let available_len;
             {
@@ -617,7 +607,6 @@ impl<S: Read + Write> Read for SslStream<S>
                 let iterator = self.read_buf.iter().take(dst.len());
                 iterator_len = iterator.len();
                 dst_vec.extend(iterator);
-                data_left -= iterator_len;
             }
             // Make sure we do not read the same data multiple times
             if iterator_len < available_len {
@@ -625,7 +614,24 @@ impl<S: Read + Write> Read for SslStream<S>
             } else {
                 self.read_buf.clear();
             }
+
+            for (d, s) in dst.iter_mut().zip(dst_vec.iter()) {
+                *d = *s;
+            }
+            return Ok(dst_vec.len());
         }
+
+        let mut dst_vec: Vec<u8> = Vec::new();
+        let mut data_left = dst.len();
+
+        let mut buffers = [
+            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
+            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
+            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
+            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
+            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() }
+        ];
+        let mut message = SecBufferDesc { ulVersion: SECBUFFER_VERSION, cBuffers: 5, pBuffers: &mut buffers[0] as *mut SecBuffer};
 
         //TODO: maybe handle that as separate reads/more efficiently?
 
@@ -646,17 +652,17 @@ impl<S: Read + Write> Read for SslStream<S>
                 buf.extend(&self.read_buf_raw[..]); //is a .clone() necessary here?
                 debug!("[EXTRA] read {}", self.read_buf_raw.len());
                 self.read_buf_raw.clear();
-            }
+            } else {
+                let mut i_read_buf = vec![0 as u8; 8192];
+                let bytes = self.stream.read(&mut i_read_buf).unwrap(); //Error Handling TODO
+                if bytes > 0 {
+                    buf.extend(&i_read_buf[..bytes]);
+                }
 
-            let mut i_read_buf = vec![0 as u8; 8192];
-            let bytes = self.stream.read(&mut i_read_buf).unwrap(); //Error Handling TODO
-            if bytes > 0 {
-                buf.extend(&i_read_buf[..bytes]);
-            }
-
-            if bytes + buf.len() == 0 {
-                //TODO: store unused buf data on break (read_buf_raw)
-                break;
+                if bytes + buf.len() == 0 {
+                    //TODO: store unused buf data on break (read_buf_raw)
+                    break;
+                }
             }
 
             buffers[0].pvBuffer = buf.as_mut_ptr() as *mut c_void;
@@ -666,6 +672,7 @@ impl<S: Read + Write> Read for SslStream<S>
             buffers[1].BufferType = SECBUFFER_EMPTY;
             buffers[2].BufferType = SECBUFFER_EMPTY;
             buffers[3].BufferType = SECBUFFER_EMPTY;
+            buffers[4].BufferType = SECBUFFER_EMPTY;
             unsafe {
                 status = DecryptMessage(ctxt as *mut SecHandle, &mut message as *mut SecBufferDesc, 0, ptr::null_mut());
                 debug!("decrypt status: {} -> {}", buf.len(), status);
@@ -673,6 +680,9 @@ impl<S: Read + Write> Read for SslStream<S>
                 // Store extra data (not decrypted yet = raw), if available
                 if status == SEC_E_INCOMPLETE_MESSAGE {
                     continue;
+                } else if status != SEC_E_OK {
+                    return Err(IoError::new(std::io::ErrorKind::Other,
+                                            format!("DecryptMessage failed with status {}", status)));
                 }
                 buf.clear();
 
@@ -738,9 +748,10 @@ impl<S: Read + Write> Write for SslStream<S>
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
+            SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() },
             SecBuffer { BufferType: SECBUFFER_EMPTY, cbBuffer: 0, pvBuffer: ptr::null_mut() }
         ];
-        let mut message = SecBufferDesc { ulVersion: SECBUFFER_VERSION, cBuffers: 4, pBuffers: &mut buffers[0] as *mut SecBuffer };
+        let mut message = SecBufferDesc { ulVersion: SECBUFFER_VERSION, cBuffers: 5, pBuffers: &mut buffers[0] as *mut SecBuffer };
 
         if self.stream_sizes.cbHeader == 0 {
             return Err(IoError::new(std::io::ErrorKind::Other, "SSLStream doesn't seem initialized. Maybe you forgot to call .init?"));
@@ -766,6 +777,7 @@ impl<S: Read + Write> Write for SslStream<S>
         buffers[2].BufferType   = SECBUFFER_STREAM_TRAILER;
 
         buffers[3].BufferType   = SECBUFFER_EMPTY;
+        buffers[4].BufferType   = SECBUFFER_EMPTY;
 
         let ctxt = get_mut_handle!(self, ctxt);
 
