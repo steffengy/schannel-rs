@@ -9,6 +9,7 @@ use std::error;
 use std::fmt;
 use std::io;
 use std::mem;
+use std::ops::Deref;
 use std::ptr;
 use std::result;
 use std::slice;
@@ -117,10 +118,8 @@ impl TlsStreamBuilder {
         let (ctxt, buf) = try!(SecurityContext::initialize_new(cred, domain)
                                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
 
-        unsafe {
-            let buf = slice::from_raw_parts(buf.0.pvBuffer as *const _, buf.0.cbBuffer as usize);
-            try!(stream.write_all(buf));
-        }
+        try!(stream.write_all(&buf));
+        drop(buf);
         try!(stream.flush());
 
         panic!();
@@ -190,6 +189,14 @@ struct ContextBuffer(SecBuffer);
 impl Drop for ContextBuffer {
     fn drop(&mut self) {
         unsafe { FreeContextBuffer(self.0.pvBuffer); }
+    }
+}
+
+impl Deref for ContextBuffer {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.0.pvBuffer as *const _, self.0.cbBuffer as usize) }
     }
 }
 
