@@ -7,7 +7,7 @@ use secur32::{AcquireCredentialsHandleA, FreeCredentialsHandle, InitializeSecuri
               DeleteSecurityContext, FreeContextBuffer};
 use std::error;
 use std::fmt;
-use std::io;
+use std::io::{self, Read, Write, Cursor};
 use std::mem;
 use std::ops::Deref;
 use std::ptr;
@@ -19,6 +19,15 @@ use winapi::{CredHandle, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION, 
              ISC_REQ_SEQUENCE_DETECT, ISC_REQ_ALLOCATE_MEMORY, ISC_REQ_STREAM, SecBuffer,
              SECBUFFER_EMPTY, SECBUFFER_TOKEN, SecBufferDesc, SECBUFFER_VERSION,
              SEC_I_CONTINUE_NEEDED};
+
+const MAX_RECORD_SIZE: usize = 16 * 1024;
+
+const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
+                ISC_REQ_INTEGRITY | 
+                ISC_REQ_REPLAY_DETECT |
+                ISC_REQ_SEQUENCE_DETECT |
+                ISC_REQ_ALLOCATE_MEMORY |
+                ISC_REQ_STREAM;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -111,36 +120,39 @@ impl TlsStreamBuilder {
         self
     }
 
-    pub fn initialize<S>(&self, cred: &SchannelCred, mut stream: S) -> io::Result<TlsStream<S>>
-        where S: io::Read + io::Write
+    pub fn initialize<S>(&self, cred: SchannelCred, mut stream: S) -> io::Result<TlsStream<S>>
+        where S: Read + Write
     {
-        let domain = self.domain.as_ref().map(|d| &d[..]);
-        let (ctxt, buf) = try!(SecurityContext::initialize_new(cred, domain)
+        let (ctxt, buf) = try!(SecurityContext::initialize(&cred,
+                                                           self.domain.as_ref().map(|s| &s[..]))
                                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
 
-        try!(stream.write_all(&buf));
-        drop(buf);
-        try!(stream.flush());
+        let mut stream = TlsStream {
+            cred: cred,
+            context: ctxt,
+            domain: self.domain.clone(),
+            stream: stream,
+            state: State::Initializing,
+            plaintext_in_buf: Cursor::new(Vec::with_capacity(MAX_RECORD_SIZE)),
+            encrypted_in_buf: Vec::with_capacity(MAX_RECORD_SIZE),
+            plaintext_out_buf: Cursor::new(Vec::with_capacity(MAX_RECORD_SIZE)),
+            encrypted_out_buf: Cursor::new(Vec::with_capacity(MAX_RECORD_SIZE)),
+        };
 
-        panic!();
+        stream.encrypted_out_buf.get_mut().extend_from_slice(&buf);
+
+        Ok(stream)
     }
 }
 
 struct SecurityContext(CtxtHandle);
 
 impl SecurityContext {
-    fn initialize_new(cred: &SchannelCred,
-                      domain: Option<&[u16]>)
-                      -> Result<(SecurityContext, ContextBuffer)> {
+    fn initialize(cred: &SchannelCred,
+                  domain: Option<&[u16]>)
+                  -> Result<(SecurityContext, ContextBuffer)> {
         unsafe {
             let domain = domain.map(|b| b.as_ptr() as *mut u16).unwrap_or(ptr::null_mut());
-
-            let requests = ISC_REQ_CONFIDENTIALITY |
-                ISC_REQ_INTEGRITY | 
-                ISC_REQ_REPLAY_DETECT |
-                ISC_REQ_SEQUENCE_DETECT |
-                ISC_REQ_ALLOCATE_MEMORY |
-                ISC_REQ_STREAM;
 
             let mut ctxt = mem::uninitialized();
 
@@ -160,7 +172,7 @@ impl SecurityContext {
             let status = InitializeSecurityContextW(&cred.0 as *const _ as *mut _,
                                                     ptr::null_mut(),
                                                     domain,
-                                                    requests,
+                                                    INIT_REQUESTS,
                                                     0,
                                                     0,
                                                     ptr::null_mut(),
@@ -200,13 +212,25 @@ impl Deref for ContextBuffer {
     }
 }
 
+enum State {
+    Initializing,
+    Streaming,
+}
+
 pub struct TlsStream<S> {
-    stream: S,
+    cred: SchannelCred,
     context: SecurityContext,
+    domain: Option<Vec<u16>>,
+    stream: S,
+    state: State,
+    plaintext_in_buf: Cursor<Vec<u8>>,
+    encrypted_in_buf: Vec<u8>,
+    plaintext_out_buf: Cursor<Vec<u8>>,
+    encrypted_out_buf: Cursor<Vec<u8>>,
 }
 
 impl<S> TlsStream<S>
-    where S: io::Read + io::Write
+    where S: Read + Write
 {
     pub fn get_ref(&self) -> &S {
         &self.stream
@@ -229,7 +253,7 @@ mod test {
         let stream = TcpStream::connect("google.com:443").unwrap();
         let stream = TlsStreamBuilder::new()
                          .domain("google.com")
-                         .initialize(&creds, stream)
+                         .initialize(creds, stream)
                          .unwrap();
     }
 }
