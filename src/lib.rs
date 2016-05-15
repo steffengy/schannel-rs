@@ -4,13 +4,13 @@ extern crate winapi;
 
 use libc::c_ulong;
 use secur32::{AcquireCredentialsHandleA, FreeCredentialsHandle, InitializeSecurityContextW,
-              DeleteSecurityContext, FreeContextBuffer, QueryContextAttributesW};
+              DeleteSecurityContext, FreeContextBuffer, QueryContextAttributesW, DecryptMessage};
 use std::cmp;
 use std::error;
 use std::fmt;
 use std::io::{self, Read, Write, Cursor};
 use std::mem;
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::ptr;
 use std::result;
 use std::slice;
@@ -20,7 +20,7 @@ use winapi::{CredHandle, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION, 
              ISC_REQ_SEQUENCE_DETECT, ISC_REQ_ALLOCATE_MEMORY, ISC_REQ_STREAM, SecBuffer,
              SECBUFFER_EMPTY, SECBUFFER_TOKEN, SecBufferDesc, SECBUFFER_VERSION,
              SEC_I_CONTINUE_NEEDED, SecPkgContext_StreamSizes, SECPKG_ATTR_STREAM_SIZES,
-             SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE};
+             SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA};
 
 const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
                 ISC_REQ_INTEGRITY | 
@@ -147,6 +147,15 @@ enum InitializeResponse {
     ContinueNeeded(usize, ContextBuffer),
     IncompleteMessage,
     Ok(usize, Option<ContextBuffer>),
+}
+
+enum DecryptResponse {
+    Ok {
+        nread: usize,
+        decrypted: Range<usize>,
+    },
+    IncompleteMessage,
+    // Renegotiate,
 }
 
 struct SecurityContext(CtxtHandle);
@@ -281,16 +290,69 @@ impl SecurityContext {
         }
     }
 
-    fn stream_sizes(&self) -> Result<SecPkgContext_StreamSizes> {
+    fn stream_sizes(&mut self) -> Result<SecPkgContext_StreamSizes> {
         unsafe {
             let mut stream_sizes = mem::uninitialized();
-            let status = QueryContextAttributesW(&self.0 as *const _ as *mut _,
+            let status = QueryContextAttributesW(&mut self.0,
                                                  SECPKG_ATTR_STREAM_SIZES,
                                                  &mut stream_sizes as *mut _ as *mut _);
             if status == SEC_E_OK {
                 Ok(stream_sizes)
             } else {
                 Err(Error(status))
+            }
+        }
+    }
+
+    fn decrypt(&mut self, buf: &mut [u8]) -> Result<DecryptResponse> {
+        unsafe {
+            let bufs = &mut [SecBuffer {
+                                 cbBuffer: buf.len() as c_ulong,
+                                 BufferType: SECBUFFER_DATA,
+                                 pvBuffer: buf.as_mut_ptr() as *mut _,
+                             },
+                             SecBuffer {
+                                cbBuffer: 0,
+                                BufferType: SECBUFFER_EMPTY,
+                                pvBuffer: ptr::null_mut(),
+                             },
+                             SecBuffer {
+                                cbBuffer: 0,
+                                BufferType: SECBUFFER_EMPTY,
+                                pvBuffer: ptr::null_mut(),
+                             },
+                             SecBuffer {
+                                cbBuffer: 0,
+                                BufferType: SECBUFFER_EMPTY,
+                                pvBuffer: ptr::null_mut(),
+                             },
+                             SecBuffer {
+                                cbBuffer: 0,
+                                BufferType: SECBUFFER_EMPTY,
+                                pvBuffer: ptr::null_mut(),
+                             }];
+            let mut bufdesc = SecBufferDesc {
+                ulVersion: SECBUFFER_VERSION,
+                cBuffers: 5,
+                pBuffers: bufs.as_mut_ptr(),
+            };
+
+            match DecryptMessage(&mut self.0, &mut bufdesc, 0, ptr::null_mut()) {
+                SEC_E_OK => {
+                    let nread = if bufs[3].BufferType == SECBUFFER_EXTRA {
+                        buf.len() - bufs[3].cbBuffer as usize
+                    } else {
+                        buf.len()
+                    };
+                    let start = bufs[1].pvBuffer as usize - buf.as_ptr() as usize;
+                    let end = start + bufs[1].cbBuffer as usize;
+                    Ok(DecryptResponse::Ok {
+                        nread: nread,
+                        decrypted: start..end,
+                    })
+                }
+                SEC_E_INCOMPLETE_MESSAGE => Ok(DecryptResponse::IncompleteMessage),
+                e => Err(Error(e)),
             }
         }
     }
@@ -374,7 +436,9 @@ impl<S> TlsStream<S>
                     if let Some(buf) = buf {
                         self.out_buf.get_mut().extend_from_slice(&buf);
                     }
-                    // FIXME try to decrypt if encrypted_in_buf is nonempty
+                    if self.encrypted_in_buf.position() != 0 {
+                        try!(self.decrypt().map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                    }
                     self.state = State::Streaming;
                 }
                 Ok(InitializeResponse::IncompleteMessage) => needs_read = true,
@@ -427,6 +491,18 @@ impl<S> TlsStream<S>
 
             self.encrypted_in_buf.set_position(count as u64);
         }
+    }
+
+    fn decrypt(&mut self) -> Result<()> {
+        match try!(self.context.decrypt(self.encrypted_in_buf.get_mut())) {
+            DecryptResponse::Ok { nread, decrypted } => {
+                self.plaintext_in_buf.get_mut().extend_from_slice(&self.encrypted_in_buf.get_ref()[decrypted]);
+                self.consume_encrypted_in(nread);
+            }
+            DecryptResponse::IncompleteMessage => {}
+        }
+
+        Ok(())
     }
 }
 
