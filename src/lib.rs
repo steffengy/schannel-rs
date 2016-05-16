@@ -4,7 +4,8 @@ extern crate winapi;
 
 use libc::c_ulong;
 use secur32::{AcquireCredentialsHandleA, FreeCredentialsHandle, InitializeSecurityContextW,
-              DeleteSecurityContext, FreeContextBuffer, QueryContextAttributesW, DecryptMessage};
+              DeleteSecurityContext, FreeContextBuffer, QueryContextAttributesW, DecryptMessage,
+              EncryptMessage};
 use std::cmp;
 use std::error;
 use std::fmt;
@@ -20,10 +21,11 @@ use winapi::{CredHandle, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION, 
              ISC_REQ_SEQUENCE_DETECT, ISC_REQ_ALLOCATE_MEMORY, ISC_REQ_STREAM, SecBuffer,
              SECBUFFER_EMPTY, SECBUFFER_TOKEN, SecBufferDesc, SECBUFFER_VERSION,
              SEC_I_CONTINUE_NEEDED, SecPkgContext_StreamSizes, SECPKG_ATTR_STREAM_SIZES,
-             SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA};
+             SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA,
+             SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER};
 
 const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
-                ISC_REQ_INTEGRITY | 
+                ISC_REQ_INTEGRITY |
                 ISC_REQ_REPLAY_DETECT |
                 ISC_REQ_SEQUENCE_DETECT |
                 ISC_REQ_ALLOCATE_MEMORY |
@@ -52,6 +54,12 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn description(&self) -> &str {
         "an SChannel error"
+    }
+}
+
+impl Error {
+    fn into_io(self) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, self)
     }
 }
 
@@ -125,7 +133,7 @@ impl TlsStreamBuilder {
     {
         let (ctxt, buf) = try!(SecurityContext::initialize(&cred,
                                                            self.domain.as_ref().map(|s| &s[..]))
-                                   .map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                                   .map_err(Error::into_io));
 
         let mut stream = TlsStream {
             cred: cred,
@@ -136,6 +144,13 @@ impl TlsStreamBuilder {
             plaintext_in_buf: Cursor::new(Vec::new()),
             encrypted_in_buf: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.to_owned()),
+            sizes: SecPkgContext_StreamSizes {
+                cbHeader: 0,
+                cbTrailer: 0,
+                cbMaximumMessage: 0,
+                cBuffers: 0,
+                cbBlockSize: 0,
+            },
         };
         try!(stream.initialize());
 
@@ -394,6 +409,7 @@ pub struct TlsStream<S> {
     plaintext_in_buf: Cursor<Vec<u8>>,
     encrypted_in_buf: Cursor<Vec<u8>>,
     out_buf: Cursor<Vec<u8>>,
+    sizes: SecPkgContext_StreamSizes,
 }
 
 impl<S> TlsStream<S>
@@ -437,12 +453,13 @@ impl<S> TlsStream<S>
                         self.out_buf.get_mut().extend_from_slice(&buf);
                     }
                     if self.encrypted_in_buf.position() != 0 {
-                        try!(self.decrypt().map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
+                        try!(self.decrypt().map_err(Error::into_io));
                     }
+                    self.sizes = try!(self.context.stream_sizes().map_err(Error::into_io));
                     self.state = State::Streaming;
                 }
                 Ok(InitializeResponse::IncompleteMessage) => needs_read = true,
-                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+                Err(e) => return Err(e.into_io()),
             }
         }
 
@@ -457,9 +474,6 @@ impl<S> TlsStream<S>
             out += nwritten;
             self.out_buf.set_position((position + nwritten) as u64);
         }
-
-        self.out_buf.set_position(0);
-        self.out_buf.get_mut().clear();
 
         Ok(out)
     }
@@ -504,6 +518,59 @@ impl<S> TlsStream<S>
 
         Ok(())
     }
+
+    fn encrypt(&mut self, buf: &[u8]) -> Result<usize> {
+        unsafe {
+            let message_len = cmp::min(buf.len(), self.sizes.cbMaximumMessage as usize);
+            let len = self.sizes.cbHeader as usize + message_len + self.sizes.cbTrailer as usize;
+
+            if self.out_buf.get_ref().len() < len {
+                self.out_buf.get_mut().resize(len, 0);
+            }
+
+            let message_start = self.sizes.cbHeader as usize;
+            self.out_buf
+                .get_mut()[message_start..message_start + message_len]
+                .clone_from_slice(&buf[..message_len]);
+
+            let buf_start = self.out_buf.get_mut().as_mut_ptr();
+            let bufs = &mut [SecBuffer {
+                                 cbBuffer: self.sizes.cbHeader,
+                                 BufferType: SECBUFFER_STREAM_HEADER,
+                                 pvBuffer: buf_start as *mut _,
+                             },
+                             SecBuffer {
+                                 cbBuffer: message_len as c_ulong,
+                                 BufferType: SECBUFFER_DATA,
+                                 pvBuffer: buf_start.offset(self.sizes.cbHeader as isize) as *mut _,
+                             },
+                             SecBuffer {
+                                 cbBuffer: self.sizes.cbTrailer,
+                                 BufferType: SECBUFFER_STREAM_TRAILER,
+                                 pvBuffer: buf_start.offset(self.sizes.cbHeader as isize + message_len as isize) as *mut _,
+                             },
+                             SecBuffer {
+                                 cbBuffer: 0,
+                                 BufferType: SECBUFFER_EMPTY,
+                                 pvBuffer: ptr::null_mut(),
+                             }];
+            let mut bufdesc = SecBufferDesc {
+                ulVersion: SECBUFFER_VERSION,
+                cBuffers: 4,
+                pBuffers: bufs.as_mut_ptr(),
+            };
+
+            match EncryptMessage(&mut self.context.0, 0, &mut bufdesc, 0) {
+                SEC_E_OK => {
+                    let len = bufs[0].cbBuffer + bufs[1].cbBuffer + bufs[2].cbBuffer;
+                    self.out_buf.get_mut().truncate(len as usize);
+                    self.out_buf.set_position(0);
+                    Ok(message_len)
+                }
+                err => Err(Error(err)),
+            }
+        }
+    }
 }
 
 impl<S> Write for TlsStream<S>
@@ -511,7 +578,9 @@ impl<S> Write for TlsStream<S>
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         try!(self.initialize());
-        unimplemented!();
+        let nwritten = try!(self.encrypt(buf).map_err(Error::into_io));
+        try!(self.write_out());
+        Ok(nwritten)
     }
 
     fn flush(&mut self) -> io::Result<()> {
