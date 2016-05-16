@@ -658,7 +658,14 @@ impl<S> Write for TlsStream<S>
         try!(self.initialize());
 
         let len = cmp::min(buf.len(), self.sizes.cbMaximumMessage as usize);
-        try!(self.encrypt(&buf[..len]).map_err(Error::into_io));
+
+        // if we have pending output data, it must have been because a previous
+        // attempt to send this data ran into an error. Specifically in the
+        // case of WouldBlock errors, we expect another call to write with the
+        // same data.
+        if self.out_buf.position() == self.out_buf.get_ref().len() as u64 {
+            try!(self.encrypt(&buf[..len]).map_err(Error::into_io));
+        }
         try!(self.write_out());
 
         Ok(len)
