@@ -696,4 +696,15 @@ mod test {
         assert!(out.starts_with(b"HTTP/1.0 200 OK"));
         assert!(out.ends_with(b"</html>"));
     }
+
+    #[test]
+    fn bad_domain() {
+        let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
+        let stream = TcpStream::connect("google.com:443").unwrap();
+        TlsStreamBuilder::new()
+                         .domain("foobar.com")
+                         .initialize(creds, stream)
+                         .err()
+                         .unwrap();
+    }
 }
