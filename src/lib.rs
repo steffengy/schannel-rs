@@ -140,7 +140,12 @@ impl TlsStreamBuilder {
             context: ctxt,
             domain: self.domain.clone(),
             stream: stream,
-            state: State::Initializing,
+            state: State::Initializing {
+                needs_flush: false,
+                needs_read: true,
+                more_calls: true,
+                shutting_down: false,
+            },
             plaintext_in_buf: Cursor::new(Vec::new()),
             encrypted_in_buf: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.to_owned()),
@@ -396,8 +401,14 @@ impl Deref for ContextBuffer {
 }
 
 enum State {
-    Initializing,
+    Initializing {
+        needs_flush: bool,
+        needs_read: bool,
+        more_calls: bool,
+        shutting_down: bool,
+    },
     Streaming,
+    Shutdown,
 }
 
 pub struct TlsStream<S> {
@@ -424,11 +435,34 @@ impl<S> TlsStream<S>
     }
 
     fn initialize(&mut self) -> io::Result<()> {
-        let mut needs_read = true;
-
-        while let State::Initializing = self.state {
+        while let State::Initializing {
+                      mut needs_flush,
+                      needs_read,
+                      more_calls,
+                      shutting_down,
+                  } = self.state {
             if try!(self.write_out()) > 0 {
+                needs_flush = true;
+                if let State::Initializing { needs_flush: ref mut n, .. } = self.state {
+                    *n = needs_flush;
+                }
+            }
+
+            if needs_flush {
                 try!(self.stream.flush());
+                if let State::Initializing { ref mut needs_flush, .. } = self.state {
+                    *needs_flush = false;
+                }
+            }
+
+            if !more_calls {
+                self.state = if shutting_down {
+                    State::Shutdown
+                } else {
+                    State::Streaming
+                };
+
+                break;
             }
 
             if needs_read {
@@ -445,7 +479,9 @@ impl<S> TlsStream<S>
                 Ok(InitializeResponse::ContinueNeeded(nread, buf)) => {
                     self.consume_encrypted_in(nread);
                     self.out_buf.get_mut().extend_from_slice(&buf);
-                    needs_read = self.encrypted_in_buf.get_ref().len() == 0;
+                    if let State::Initializing { ref mut needs_read, .. } = self.state {
+                        *needs_read = self.encrypted_in_buf.get_ref().len() > 0;
+                    }
                 }
                 Ok(InitializeResponse::Ok(nread, buf)) => {
                     self.consume_encrypted_in(nread);
@@ -456,9 +492,15 @@ impl<S> TlsStream<S>
                         try!(self.decrypt().map_err(Error::into_io));
                     }
                     self.sizes = try!(self.context.stream_sizes().map_err(Error::into_io));
-                    self.state = State::Streaming;
+                    if let State::Initializing { ref mut more_calls, .. } = self.state {
+                        *more_calls = false;
+                    }
                 }
-                Ok(InitializeResponse::IncompleteMessage) => needs_read = true,
+                Ok(InitializeResponse::IncompleteMessage) => {
+                    if let State::Initializing { ref mut needs_read, .. } = self.state {
+                        *needs_read = true;
+                    }
+                },
                 Err(e) => return Err(e.into_io()),
             }
         }
@@ -596,6 +638,10 @@ impl<S> Read for TlsStream<S>
     where S: Read + Write
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let State::Shutdown = self.state {
+            return Ok(0);
+        }
+
         while self.plaintext_in_buf.position() as usize == self.plaintext_in_buf.get_ref().len() {
             try!(self.initialize());
             if try!(self.read_in()) == 0 {
