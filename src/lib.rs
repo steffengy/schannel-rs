@@ -519,10 +519,10 @@ impl<S> TlsStream<S>
         Ok(())
     }
 
-    fn encrypt(&mut self, buf: &[u8]) -> Result<usize> {
+    fn encrypt(&mut self, buf: &[u8]) -> Result<()> {
+        assert!(buf.len() <= self.sizes.cbMaximumMessage as usize);
         unsafe {
-            let message_len = cmp::min(buf.len(), self.sizes.cbMaximumMessage as usize);
-            let len = self.sizes.cbHeader as usize + message_len + self.sizes.cbTrailer as usize;
+            let len = self.sizes.cbHeader as usize + buf.len() + self.sizes.cbTrailer as usize;
 
             if self.out_buf.get_ref().len() < len {
                 self.out_buf.get_mut().resize(len, 0);
@@ -530,8 +530,8 @@ impl<S> TlsStream<S>
 
             let message_start = self.sizes.cbHeader as usize;
             self.out_buf
-                .get_mut()[message_start..message_start + message_len]
-                .clone_from_slice(&buf[..message_len]);
+                .get_mut()[message_start..message_start + buf.len()]
+                .clone_from_slice(buf);
 
             let buf_start = self.out_buf.get_mut().as_mut_ptr();
             let bufs = &mut [SecBuffer {
@@ -540,14 +540,14 @@ impl<S> TlsStream<S>
                                  pvBuffer: buf_start as *mut _,
                              },
                              SecBuffer {
-                                 cbBuffer: message_len as c_ulong,
+                                 cbBuffer: buf.len() as c_ulong,
                                  BufferType: SECBUFFER_DATA,
                                  pvBuffer: buf_start.offset(self.sizes.cbHeader as isize) as *mut _,
                              },
                              SecBuffer {
                                  cbBuffer: self.sizes.cbTrailer,
                                  BufferType: SECBUFFER_STREAM_TRAILER,
-                                 pvBuffer: buf_start.offset(self.sizes.cbHeader as isize + message_len as isize) as *mut _,
+                                 pvBuffer: buf_start.offset(self.sizes.cbHeader as isize + buf.len() as isize) as *mut _,
                              },
                              SecBuffer {
                                  cbBuffer: 0,
@@ -565,7 +565,7 @@ impl<S> TlsStream<S>
                     let len = bufs[0].cbBuffer + bufs[1].cbBuffer + bufs[2].cbBuffer;
                     self.out_buf.get_mut().truncate(len as usize);
                     self.out_buf.set_position(0);
-                    Ok(message_len)
+                    Ok(())
                 }
                 err => Err(Error(err)),
             }
@@ -578,9 +578,12 @@ impl<S> Write for TlsStream<S>
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         try!(self.initialize());
-        let nwritten = try!(self.encrypt(buf).map_err(Error::into_io));
+
+        let len = cmp::min(buf.len(), self.sizes.cbMaximumMessage as usize);
+        try!(self.encrypt(&buf[..len]).map_err(Error::into_io));
         try!(self.write_out());
-        Ok(nwritten)
+
+        Ok(len)
     }
 
     fn flush(&mut self) -> io::Result<()> {
