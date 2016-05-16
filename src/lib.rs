@@ -25,12 +25,10 @@ use winapi::{CredHandle, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION, 
              SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER, SEC_I_CONTEXT_EXPIRED,
              SEC_I_RENEGOTIATE};
 
-const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
-                ISC_REQ_INTEGRITY |
-                ISC_REQ_REPLAY_DETECT |
-                ISC_REQ_SEQUENCE_DETECT |
-                ISC_REQ_ALLOCATE_MEMORY |
-                ISC_REQ_STREAM;
+const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY | ISC_REQ_INTEGRITY | ISC_REQ_REPLAY_DETECT |
+                               ISC_REQ_SEQUENCE_DETECT |
+                               ISC_REQ_ALLOCATE_MEMORY |
+                               ISC_REQ_STREAM;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -47,7 +45,7 @@ impl fmt::Debug for Error {
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         match self.0 {
-            n => write!(fmt, "unknown error {:#x}", n)
+            n => write!(fmt, "unknown error {:#x}", n),
         }
     }
 }
@@ -110,7 +108,9 @@ pub struct SchannelCred(CredHandle);
 
 impl Drop for SchannelCred {
     fn drop(&mut self) {
-        unsafe { FreeCredentialsHandle(&mut self.0); }
+        unsafe {
+            FreeCredentialsHandle(&mut self.0);
+        }
     }
 }
 
@@ -215,10 +215,10 @@ impl SecurityContext {
     }
 
     fn continue_initialize(&mut self,
-                            cred: &SchannelCred,
-                            domain: Option<&[u16]>,
-                            buf: &mut [u8])
-                            -> Result<InitializeResponse> {
+                           cred: &SchannelCred,
+                           domain: Option<&[u16]>,
+                           buf: &mut [u8])
+                           -> Result<InitializeResponse> {
         unsafe {
             let domain = domain.map(|b| b.as_ptr() as *mut u16).unwrap_or(ptr::null_mut());
 
@@ -275,7 +275,7 @@ impl SecurityContext {
 
             match status {
                 SEC_I_CONTINUE_NEEDED => {
-                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA  {
+                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA {
                         buf.len() - inbufs[1].cbBuffer as usize
                     } else {
                         buf.len()
@@ -285,7 +285,7 @@ impl SecurityContext {
                 }
                 SEC_E_INCOMPLETE_MESSAGE => Ok(InitializeResponse::IncompleteMessage),
                 SEC_E_OK => {
-                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA  {
+                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA {
                         buf.len() - inbufs[1].cbBuffer as usize
                     } else {
                         buf.len()
@@ -297,7 +297,7 @@ impl SecurityContext {
                     };
                     Ok(InitializeResponse::Ok(nread, to_write))
                 }
-                _ => Err(Error(status))
+                _ => Err(Error(status)),
             }
         }
     }
@@ -319,7 +319,9 @@ impl SecurityContext {
 
 impl Drop for SecurityContext {
     fn drop(&mut self) {
-        unsafe { DeleteSecurityContext(&mut self.0); }
+        unsafe {
+            DeleteSecurityContext(&mut self.0);
+        }
     }
 }
 
@@ -327,7 +329,9 @@ struct ContextBuffer(SecBuffer);
 
 impl Drop for ContextBuffer {
     fn drop(&mut self) {
-        unsafe { FreeContextBuffer(self.0.pvBuffer); }
+        unsafe {
+            FreeContextBuffer(self.0.pvBuffer);
+        }
     }
 }
 
@@ -374,11 +378,7 @@ impl<S> TlsStream<S>
     }
 
     fn initialize(&mut self) -> io::Result<()> {
-        while let State::Initializing {
-                      mut needs_flush,
-                      more_calls,
-                      shutting_down,
-                  } = self.state {
+        while let State::Initializing { mut needs_flush, more_calls, shutting_down } = self.state {
             if try!(self.write_out()) > 0 {
                 needs_flush = true;
                 if let State::Initializing { needs_flush: ref mut n, .. } = self.state {
@@ -435,7 +435,7 @@ impl<S> TlsStream<S>
                 }
                 Ok(InitializeResponse::IncompleteMessage) => {
                     self.needs_read = true;
-                },
+                }
                 Err(e) => return Err(e.into_io()),
             }
         }
@@ -492,24 +492,24 @@ impl<S> TlsStream<S>
                                  pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
                              },
                              SecBuffer {
-                                cbBuffer: 0,
-                                BufferType: SECBUFFER_EMPTY,
-                                pvBuffer: ptr::null_mut(),
+                                 cbBuffer: 0,
+                                 BufferType: SECBUFFER_EMPTY,
+                                 pvBuffer: ptr::null_mut(),
                              },
                              SecBuffer {
-                                cbBuffer: 0,
-                                BufferType: SECBUFFER_EMPTY,
-                                pvBuffer: ptr::null_mut(),
+                                 cbBuffer: 0,
+                                 BufferType: SECBUFFER_EMPTY,
+                                 pvBuffer: ptr::null_mut(),
                              },
                              SecBuffer {
-                                cbBuffer: 0,
-                                BufferType: SECBUFFER_EMPTY,
-                                pvBuffer: ptr::null_mut(),
+                                 cbBuffer: 0,
+                                 BufferType: SECBUFFER_EMPTY,
+                                 pvBuffer: ptr::null_mut(),
                              },
                              SecBuffer {
-                                cbBuffer: 0,
-                                BufferType: SECBUFFER_EMPTY,
-                                pvBuffer: ptr::null_mut(),
+                                 cbBuffer: 0,
+                                 BufferType: SECBUFFER_EMPTY,
+                                 pvBuffer: ptr::null_mut(),
                              }];
             let mut bufdesc = SecBufferDesc {
                 ulVersion: SECBUFFER_VERSION,
@@ -540,7 +540,8 @@ impl<S> TlsStream<S>
                     self.needs_read = true;
                     Ok(())
                 }
-                state @ SEC_I_CONTEXT_EXPIRED | state @ SEC_I_RENEGOTIATE => {
+                state @ SEC_I_CONTEXT_EXPIRED |
+                state @ SEC_I_RENEGOTIATE => {
                     self.state = State::Initializing {
                         needs_flush: false,
                         more_calls: true,
@@ -687,9 +688,9 @@ mod test {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let mut stream = TlsStreamBuilder::new()
-                         .domain("google.com")
-                         .initialize(creds, stream)
-                         .unwrap();
+                             .domain("google.com")
+                             .initialize(creds, stream)
+                             .unwrap();
         stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
         let mut out = vec![];
         stream.read_to_end(&mut out).unwrap();
@@ -702,9 +703,9 @@ mod test {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         TlsStreamBuilder::new()
-                         .domain("foobar.com")
-                         .initialize(creds, stream)
-                         .err()
-                         .unwrap();
+            .domain("foobar.com")
+            .initialize(creds, stream)
+            .err()
+            .unwrap();
     }
 }
