@@ -542,15 +542,10 @@ impl<S> TlsStream<S>
                                  cbBuffer: 0,
                                  BufferType: SECBUFFER_EMPTY,
                                  pvBuffer: ptr::null_mut(),
-                             },
-                             SecBuffer {
-                                 cbBuffer: 0,
-                                 BufferType: SECBUFFER_EMPTY,
-                                 pvBuffer: ptr::null_mut(),
                              }];
             let mut bufdesc = SecBufferDesc {
                 ulVersion: SECBUFFER_VERSION,
-                cBuffers: 5,
+                cBuffers: 4,
                 pBuffers: bufs.as_mut_ptr(),
             };
 
