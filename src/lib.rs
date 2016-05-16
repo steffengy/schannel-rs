@@ -9,9 +9,9 @@ use secur32::{AcquireCredentialsHandleA, FreeCredentialsHandle, InitializeSecuri
 use std::cmp;
 use std::error;
 use std::fmt;
-use std::io::{self, Read, Write, Cursor};
+use std::io::{self, BufRead, Read, Write, Cursor};
 use std::mem;
-use std::ops::{Deref, Range};
+use std::ops::Deref;
 use std::ptr;
 use std::result;
 use std::slice;
@@ -22,7 +22,8 @@ use winapi::{CredHandle, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION, 
              SECBUFFER_EMPTY, SECBUFFER_TOKEN, SecBufferDesc, SECBUFFER_VERSION,
              SEC_I_CONTINUE_NEEDED, SecPkgContext_StreamSizes, SECPKG_ATTR_STREAM_SIZES,
              SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA,
-             SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER};
+             SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER, SEC_I_CONTEXT_EXPIRED,
+             SEC_I_RENEGOTIATE};
 
 const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
                 ISC_REQ_INTEGRITY |
@@ -142,12 +143,12 @@ impl TlsStreamBuilder {
             stream: stream,
             state: State::Initializing {
                 needs_flush: false,
-                needs_read: true,
                 more_calls: true,
                 shutting_down: false,
             },
-            plaintext_in_buf: Cursor::new(Vec::new()),
-            encrypted_in_buf: Cursor::new(Vec::new()),
+            needs_read: true,
+            dec_in: Cursor::new(Vec::new()),
+            enc_in: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.to_owned()),
             sizes: SecPkgContext_StreamSizes {
                 cbHeader: 0,
@@ -167,15 +168,6 @@ enum InitializeResponse {
     ContinueNeeded(usize, ContextBuffer),
     IncompleteMessage,
     Ok(usize, Option<ContextBuffer>),
-}
-
-enum DecryptResponse {
-    Ok {
-        nread: usize,
-        decrypted: Range<usize>,
-    },
-    IncompleteMessage,
-    // Renegotiate,
 }
 
 struct SecurityContext(CtxtHandle);
@@ -323,59 +315,6 @@ impl SecurityContext {
             }
         }
     }
-
-    fn decrypt(&mut self, buf: &mut [u8]) -> Result<DecryptResponse> {
-        unsafe {
-            let bufs = &mut [SecBuffer {
-                                 cbBuffer: buf.len() as c_ulong,
-                                 BufferType: SECBUFFER_DATA,
-                                 pvBuffer: buf.as_mut_ptr() as *mut _,
-                             },
-                             SecBuffer {
-                                cbBuffer: 0,
-                                BufferType: SECBUFFER_EMPTY,
-                                pvBuffer: ptr::null_mut(),
-                             },
-                             SecBuffer {
-                                cbBuffer: 0,
-                                BufferType: SECBUFFER_EMPTY,
-                                pvBuffer: ptr::null_mut(),
-                             },
-                             SecBuffer {
-                                cbBuffer: 0,
-                                BufferType: SECBUFFER_EMPTY,
-                                pvBuffer: ptr::null_mut(),
-                             },
-                             SecBuffer {
-                                cbBuffer: 0,
-                                BufferType: SECBUFFER_EMPTY,
-                                pvBuffer: ptr::null_mut(),
-                             }];
-            let mut bufdesc = SecBufferDesc {
-                ulVersion: SECBUFFER_VERSION,
-                cBuffers: 5,
-                pBuffers: bufs.as_mut_ptr(),
-            };
-
-            match DecryptMessage(&mut self.0, &mut bufdesc, 0, ptr::null_mut()) {
-                SEC_E_OK => {
-                    let nread = if bufs[3].BufferType == SECBUFFER_EXTRA {
-                        buf.len() - bufs[3].cbBuffer as usize
-                    } else {
-                        buf.len()
-                    };
-                    let start = bufs[1].pvBuffer as usize - buf.as_ptr() as usize;
-                    let end = start + bufs[1].cbBuffer as usize;
-                    Ok(DecryptResponse::Ok {
-                        nread: nread,
-                        decrypted: start..end,
-                    })
-                }
-                SEC_E_INCOMPLETE_MESSAGE => Ok(DecryptResponse::IncompleteMessage),
-                e => Err(Error(e)),
-            }
-        }
-    }
 }
 
 impl Drop for SecurityContext {
@@ -403,7 +342,6 @@ impl Deref for ContextBuffer {
 enum State {
     Initializing {
         needs_flush: bool,
-        needs_read: bool,
         more_calls: bool,
         shutting_down: bool,
     },
@@ -417,8 +355,9 @@ pub struct TlsStream<S> {
     domain: Option<Vec<u16>>,
     stream: S,
     state: State,
-    plaintext_in_buf: Cursor<Vec<u8>>,
-    encrypted_in_buf: Cursor<Vec<u8>>,
+    needs_read: bool,
+    dec_in: Cursor<Vec<u8>>,
+    enc_in: Cursor<Vec<u8>>,
     out_buf: Cursor<Vec<u8>>,
     sizes: SecPkgContext_StreamSizes,
 }
@@ -437,7 +376,6 @@ impl<S> TlsStream<S>
     fn initialize(&mut self) -> io::Result<()> {
         while let State::Initializing {
                       mut needs_flush,
-                      needs_read,
                       more_calls,
                       shutting_down,
                   } = self.state {
@@ -465,30 +403,29 @@ impl<S> TlsStream<S>
                 break;
             }
 
-            if needs_read {
+            if self.needs_read {
                 if try!(self.read_in()) == 0 {
                     return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
                                               "unexpected EOF during handshake"));
                 }
             }
 
-            let end = self.encrypted_in_buf.position() as usize;
+            let end = self.enc_in.position() as usize;
             match self.context.continue_initialize(&self.cred,
                                                    self.domain.as_ref().map(|d| &d[..]),
-                                                   &mut self.encrypted_in_buf.get_mut()[..end]) {
+                                                   &mut self.enc_in.get_mut()[..end]) {
                 Ok(InitializeResponse::ContinueNeeded(nread, buf)) => {
-                    self.consume_encrypted_in(nread);
+                    self.consume_enc_in(nread);
+                    self.needs_read = self.enc_in.position() == 0;
                     self.out_buf.get_mut().extend_from_slice(&buf);
-                    if let State::Initializing { ref mut needs_read, .. } = self.state {
-                        *needs_read = self.encrypted_in_buf.get_ref().len() > 0;
-                    }
                 }
                 Ok(InitializeResponse::Ok(nread, buf)) => {
-                    self.consume_encrypted_in(nread);
+                    self.consume_enc_in(nread);
+                    self.needs_read = self.enc_in.position() == 0;
                     if let Some(buf) = buf {
                         self.out_buf.get_mut().extend_from_slice(&buf);
                     }
-                    if self.encrypted_in_buf.position() != 0 {
+                    if self.enc_in.position() != 0 {
                         try!(self.decrypt().map_err(Error::into_io));
                     }
                     self.sizes = try!(self.context.stream_sizes().map_err(Error::into_io));
@@ -497,9 +434,7 @@ impl<S> TlsStream<S>
                     }
                 }
                 Ok(InitializeResponse::IncompleteMessage) => {
-                    if let State::Initializing { ref mut needs_read, .. } = self.state {
-                        *needs_read = true;
-                    }
+                    self.needs_read = true;
                 },
                 Err(e) => return Err(e.into_io()),
             }
@@ -521,44 +456,102 @@ impl<S> TlsStream<S>
     }
 
     fn read_in(&mut self) -> io::Result<usize> {
-        let existing_len = self.encrypted_in_buf.position() as usize;
+        let existing_len = self.enc_in.position() as usize;
         let min_len = cmp::max(1024, 2 * existing_len);
-        if self.encrypted_in_buf.get_ref().len() < min_len {
-            self.encrypted_in_buf.get_mut().resize(min_len, 0);
+        if self.enc_in.get_ref().len() < min_len {
+            self.enc_in.get_mut().resize(min_len, 0);
         }
         let nread = {
-            let buf = &mut self.encrypted_in_buf.get_mut()[existing_len..];
+            let buf = &mut self.enc_in.get_mut()[existing_len..];
             try!(self.stream.read(buf))
         };
-        self.encrypted_in_buf.set_position((existing_len + nread) as u64);
+        self.enc_in.set_position((existing_len + nread) as u64);
         Ok(nread)
     }
 
-    fn consume_encrypted_in(&mut self, nread: usize) {
+    fn consume_enc_in(&mut self, nread: usize) {
         unsafe {
-            let src = &self.encrypted_in_buf.get_ref()[nread] as *const _;
-            let dst = self.encrypted_in_buf.get_mut().as_mut_ptr();
+            let src = &self.enc_in.get_ref()[nread] as *const _;
+            let dst = self.enc_in.get_mut().as_mut_ptr();
 
-            let size = self.encrypted_in_buf.position() as usize;
+            let size = self.enc_in.position() as usize;
             assert!(size >= nread);
             let count = size - nread;
 
             ptr::copy(src, dst, count);
 
-            self.encrypted_in_buf.set_position(count as u64);
+            self.enc_in.set_position(count as u64);
         }
     }
 
     fn decrypt(&mut self) -> Result<()> {
-        match try!(self.context.decrypt(self.encrypted_in_buf.get_mut())) {
-            DecryptResponse::Ok { nread, decrypted } => {
-                self.plaintext_in_buf.get_mut().extend_from_slice(&self.encrypted_in_buf.get_ref()[decrypted]);
-                self.consume_encrypted_in(nread);
-            }
-            DecryptResponse::IncompleteMessage => {}
-        }
+        unsafe {
+            let bufs = &mut [SecBuffer {
+                                 cbBuffer: self.enc_in.position() as c_ulong,
+                                 BufferType: SECBUFFER_DATA,
+                                 pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
+                             },
+                             SecBuffer {
+                                cbBuffer: 0,
+                                BufferType: SECBUFFER_EMPTY,
+                                pvBuffer: ptr::null_mut(),
+                             },
+                             SecBuffer {
+                                cbBuffer: 0,
+                                BufferType: SECBUFFER_EMPTY,
+                                pvBuffer: ptr::null_mut(),
+                             },
+                             SecBuffer {
+                                cbBuffer: 0,
+                                BufferType: SECBUFFER_EMPTY,
+                                pvBuffer: ptr::null_mut(),
+                             },
+                             SecBuffer {
+                                cbBuffer: 0,
+                                BufferType: SECBUFFER_EMPTY,
+                                pvBuffer: ptr::null_mut(),
+                             }];
+            let mut bufdesc = SecBufferDesc {
+                ulVersion: SECBUFFER_VERSION,
+                cBuffers: 5,
+                pBuffers: bufs.as_mut_ptr(),
+            };
 
-        Ok(())
+            match DecryptMessage(&mut self.context.0, &mut bufdesc, 0, ptr::null_mut()) {
+                SEC_E_OK => {
+                    let start = bufs[1].pvBuffer as usize - self.enc_in.get_ref().as_ptr() as usize;
+                    let end = start + bufs[1].cbBuffer as usize;
+                    self.dec_in.get_mut().clear();
+                    self.dec_in
+                        .get_mut()
+                        .extend_from_slice(&self.enc_in.get_ref()[start..end]);
+                    self.dec_in.set_position(0);
+
+                    let nread = if bufs[3].BufferType == SECBUFFER_EXTRA {
+                        self.enc_in.position() as usize - bufs[3].cbBuffer as usize
+                    } else {
+                        self.enc_in.position() as usize
+                    };
+                    self.consume_enc_in(nread);
+                    self.needs_read = self.enc_in.position() == 0;
+                    Ok(())
+                }
+                SEC_E_INCOMPLETE_MESSAGE => {
+                    self.needs_read = true;
+                    Ok(())
+                }
+                state @ SEC_I_CONTEXT_EXPIRED | state @ SEC_I_RENEGOTIATE => {
+                    self.state = State::Initializing {
+                        needs_flush: false,
+                        more_calls: true,
+                        shutting_down: state == SEC_I_CONTEXT_EXPIRED,
+                    };
+                    self.needs_read = self.enc_in.position() == 0;
+                    Ok(())
+                }
+                e => Err(Error(e)),
+            }
+        }
     }
 
     fn encrypt(&mut self, buf: &[u8]) -> Result<()> {
@@ -638,19 +631,43 @@ impl<S> Read for TlsStream<S>
     where S: Read + Write
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let State::Shutdown = self.state {
-            return Ok(0);
-        }
+        let nread = {
+            let read_buf = try!(self.fill_buf());
+            let nread = cmp::min(buf.len(), read_buf.len());
+            buf[..nread].clone_from_slice(&read_buf[..nread]);
+            nread
+        };
+        self.consume(nread);
+        Ok(nread)
+    }
+}
 
-        while self.plaintext_in_buf.position() as usize == self.plaintext_in_buf.get_ref().len() {
-            try!(self.initialize());
-            if try!(self.read_in()) == 0 {
-                return Ok(0);
+impl<S> BufRead for TlsStream<S>
+    where S: Read + Write
+{
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        while self.dec_in.position() as usize == self.dec_in.get_ref().len() {
+            if let State::Shutdown = self.state {
+                break;
             }
+
+            if self.needs_read {
+                if try!(self.read_in()) == 0 {
+                    break;
+                }
+                self.needs_read = false;
+            }
+
             try!(self.decrypt().map_err(Error::into_io));
         }
 
-        self.plaintext_in_buf.read(buf)
+        Ok(&self.dec_in.get_ref()[self.dec_in.position() as usize..])
+    }
+
+    fn consume(&mut self, amt: usize) {
+        let pos = self.dec_in.position() + amt as u64;
+        assert!(pos <= self.dec_in.get_ref().len() as u64);
+        self.dec_in.set_position(pos);
     }
 }
 
@@ -670,5 +687,9 @@ mod test {
                          .initialize(creds, stream)
                          .unwrap();
         stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
+        let mut out = vec![];
+        stream.read_to_end(&mut out).unwrap();
+        assert!(out.starts_with(b"HTTP/1.0 200 OK"));
+        assert!(out.ends_with(b"</html>"));
     }
 }
