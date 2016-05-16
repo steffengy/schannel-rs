@@ -579,6 +579,13 @@ impl<S> TlsStream<S>
                         more_calls: true,
                         shutting_down: state == SEC_I_CONTEXT_EXPIRED,
                     };
+
+                    let nread = if bufs[3].BufferType == SECBUFFER_EXTRA {
+                        self.enc_in.position() as usize - bufs[3].cbBuffer as usize
+                    } else {
+                        self.enc_in.position() as usize
+                    };
+                    self.consume_enc_in(nread);
                     self.needs_read = self.enc_in.position() == 0;
                     Ok(())
                 }
