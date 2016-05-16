@@ -607,6 +607,10 @@ impl<S> TlsStream<S>
             }
         }
     }
+
+    fn get_buf(&self) -> &[u8] {
+        &self.dec_in.get_ref()[self.dec_in.position() as usize..]
+    }
 }
 
 impl<S> Write for TlsStream<S>
@@ -646,7 +650,7 @@ impl<S> BufRead for TlsStream<S>
     where S: Read + Write
 {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        while self.dec_in.position() as usize == self.dec_in.get_ref().len() {
+        while self.get_buf().is_empty() {
             if let State::Shutdown = self.state {
                 break;
             }
@@ -661,7 +665,7 @@ impl<S> BufRead for TlsStream<S>
             try!(self.decrypt().map_err(Error::into_io));
         }
 
-        Ok(&self.dec_in.get_ref()[self.dec_in.position() as usize..])
+        Ok(self.get_buf())
     }
 
     fn consume(&mut self, amt: usize) {
