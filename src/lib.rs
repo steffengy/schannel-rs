@@ -5,7 +5,7 @@ extern crate winapi;
 use libc::c_ulong;
 use secur32::{AcquireCredentialsHandleA, FreeCredentialsHandle, InitializeSecurityContextW,
               DeleteSecurityContext, FreeContextBuffer, QueryContextAttributesW, DecryptMessage,
-              EncryptMessage};
+              EncryptMessage, ApplyControlToken};
 use std::cmp;
 use std::error;
 use std::fmt;
@@ -23,9 +23,11 @@ use winapi::{CredHandle, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION, 
              SEC_I_CONTINUE_NEEDED, SecPkgContext_StreamSizes, SECPKG_ATTR_STREAM_SIZES,
              SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA,
              SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER, SEC_I_CONTEXT_EXPIRED,
-             SEC_I_RENEGOTIATE};
+             SEC_I_RENEGOTIATE, SCHANNEL_SHUTDOWN};
 
-const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY | ISC_REQ_INTEGRITY | ISC_REQ_REPLAY_DETECT |
+const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
+                               ISC_REQ_INTEGRITY |
+                               ISC_REQ_REPLAY_DETECT |
                                ISC_REQ_SEQUENCE_DETECT |
                                ISC_REQ_ALLOCATE_MEMORY |
                                ISC_REQ_STREAM;
@@ -377,6 +379,41 @@ impl<S> TlsStream<S>
         &mut self.stream
     }
 
+    pub fn shutdown(&mut self) -> io::Result<()> {
+        match self.state {
+            State::Shutdown => return Ok(()),
+            State::Initializing { shutting_down: true, .. } => {},
+            _ => {
+                unsafe {
+                    let mut token = SCHANNEL_SHUTDOWN;
+                    let mut buf = SecBuffer {
+                        cbBuffer: mem::size_of_val(&token) as c_ulong,
+                        BufferType: SECBUFFER_TOKEN,
+                        pvBuffer: &mut token as *mut _ as *mut _,
+                    };
+                    let mut desc = SecBufferDesc {
+                        ulVersion: SECBUFFER_VERSION,
+                        cBuffers: 1,
+                        pBuffers: &mut buf,
+                    };
+                    match ApplyControlToken(&mut self.context.0, &mut desc) {
+                        SEC_E_OK => {},
+                        err => return Err(Error(err).into_io()),
+                    }
+                }
+
+                self.state = State::Initializing {
+                    needs_flush: false,
+                    more_calls: true,
+                    shutting_down: true,
+                };
+                self.needs_read = false;
+            }
+        }
+
+        self.initialize()
+    }
+
     fn initialize(&mut self) -> io::Result<()> {
         while let State::Initializing { mut needs_flush, more_calls, shutting_down } = self.state {
             if try!(self.write_out()) > 0 {
@@ -707,5 +744,16 @@ mod test {
             .initialize(creds, stream)
             .err()
             .unwrap();
+    }
+
+    #[test]
+    fn shutdown() {
+        let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
+        let stream = TcpStream::connect("google.com:443").unwrap();
+        let mut stream = TlsStreamBuilder::new()
+                             .domain("google.com")
+                             .initialize(creds, stream)
+                             .unwrap();
+        stream.shutdown().unwrap();
     }
 }
