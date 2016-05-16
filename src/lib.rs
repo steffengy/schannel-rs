@@ -521,6 +521,7 @@ impl<S> TlsStream<S>
 
     fn encrypt(&mut self, buf: &[u8]) -> Result<()> {
         assert!(buf.len() <= self.sizes.cbMaximumMessage as usize);
+
         unsafe {
             let len = self.sizes.cbHeader as usize + buf.len() + self.sizes.cbTrailer as usize;
 
@@ -595,18 +596,21 @@ impl<S> Read for TlsStream<S>
     where S: Read + Write
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.plaintext_in_buf.position() as usize != self.plaintext_in_buf.get_ref().len() {
-            return self.plaintext_in_buf.read(buf);
+        while self.plaintext_in_buf.position() as usize == self.plaintext_in_buf.get_ref().len() {
+            try!(self.initialize());
+            if try!(self.read_in()) == 0 {
+                return Ok(0);
+            }
+            try!(self.decrypt().map_err(Error::into_io));
         }
 
-        try!(self.initialize());
-
-        unimplemented!();
+        self.plaintext_in_buf.read(buf)
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::io::{Read, Write};
     use std::net::TcpStream;
 
     use super::*;
@@ -615,9 +619,10 @@ mod test {
     fn basic() {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
-        let stream = TlsStreamBuilder::new()
+        let mut stream = TlsStreamBuilder::new()
                          .domain("google.com")
                          .initialize(creds, stream)
                          .unwrap();
+        stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
     }
 }
