@@ -87,20 +87,17 @@ impl SchannelCredBuilder {
                 Direction::Outbound => SECPKG_CRED_OUTBOUND,
             };
 
-            let status = AcquireCredentialsHandleA(ptr::null_mut(),
-                                                   UNISP_NAME.as_ptr() as *mut _,
-                                                   direction,
-                                                   ptr::null_mut(),
-                                                   &mut cred_data as *mut _ as *mut _,
-                                                   None,
-                                                   ptr::null_mut(),
-                                                   &mut handle,
-                                                   ptr::null_mut());
-
-            if status == SEC_E_OK {
-                Ok(SchannelCred(handle))
-            } else {
-                Err(Error(status))
+            match AcquireCredentialsHandleA(ptr::null_mut(),
+                                            UNISP_NAME.as_ptr() as *mut _,
+                                            direction,
+                                            ptr::null_mut(),
+                                            &mut cred_data as *mut _ as *mut _,
+                                            None,
+                                            ptr::null_mut(),
+                                            &mut handle,
+                                            ptr::null_mut()) {
+                SEC_E_OK => Ok(SchannelCred(handle)),
+                err => Err(Error(err)),
             }
         }
     }
@@ -196,23 +193,21 @@ impl SecurityContext {
 
             let mut attributes = 0;
 
-            let status = InitializeSecurityContextW(&cred.0 as *const _ as *mut _,
-                                                    ptr::null_mut(),
-                                                    domain,
-                                                    INIT_REQUESTS,
-                                                    0,
-                                                    0,
-                                                    ptr::null_mut(),
-                                                    0,
-                                                    &mut ctxt,
-                                                    &mut outbuf_desc,
-                                                    &mut attributes,
-                                                    ptr::null_mut());
-            if status != SEC_I_CONTINUE_NEEDED {
-                return Err(Error(status));
+            match InitializeSecurityContextW(&cred.0 as *const _ as *mut _,
+                                             ptr::null_mut(),
+                                             domain,
+                                             INIT_REQUESTS,
+                                             0,
+                                             0,
+                                             ptr::null_mut(),
+                                             0,
+                                             &mut ctxt,
+                                             &mut outbuf_desc,
+                                             &mut attributes,
+                                             ptr::null_mut()) {
+                SEC_I_CONTINUE_NEEDED => Ok((SecurityContext(ctxt), ContextBuffer(outbuf))),
+                err => Err(Error(err)),
             }
-
-            Ok((SecurityContext(ctxt), ContextBuffer(outbuf)))
         }
     }
 
