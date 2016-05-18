@@ -163,12 +163,6 @@ impl TlsStreamBuilder {
     }
 }
 
-enum InitializeResponse {
-    ContinueNeeded(usize, ContextBuffer),
-    IncompleteMessage,
-    Ok(usize, Option<ContextBuffer>),
-}
-
 struct SecurityContext(CtxtHandle);
 
 impl SecurityContext {
@@ -207,94 +201,6 @@ impl SecurityContext {
                                              ptr::null_mut()) {
                 SEC_I_CONTINUE_NEEDED => Ok((SecurityContext(ctxt), ContextBuffer(outbuf))),
                 err => Err(Error(err)),
-            }
-        }
-    }
-
-    fn continue_initialize(&mut self,
-                           cred: &SchannelCred,
-                           domain: Option<&[u16]>,
-                           buf: &mut [u8])
-                           -> Result<InitializeResponse> {
-        unsafe {
-            let domain = domain.map(|b| b.as_ptr() as *mut u16).unwrap_or(ptr::null_mut());
-
-            let inbufs = &mut [SecBuffer {
-                                   cbBuffer: buf.len() as c_ulong,
-                                   BufferType: SECBUFFER_TOKEN,
-                                   pvBuffer: buf.as_mut_ptr() as *mut _,
-                               },
-                               SecBuffer {
-                                   cbBuffer: 0,
-                                   BufferType: SECBUFFER_EMPTY,
-                                   pvBuffer: ptr::null_mut(),
-                               }];
-            let mut inbuf_desc = SecBufferDesc {
-                ulVersion: SECBUFFER_VERSION,
-                cBuffers: 2,
-                pBuffers: inbufs.as_mut_ptr(),
-            };
-
-            let outbufs = &mut [SecBuffer {
-                                    cbBuffer: 0,
-                                    BufferType: SECBUFFER_TOKEN,
-                                    pvBuffer: ptr::null_mut(),
-                                },
-                                SecBuffer {
-                                    cbBuffer: 0,
-                                    BufferType: SECBUFFER_ALERT,
-                                    pvBuffer: ptr::null_mut(),
-                                }];
-            let mut outbuf_desc = SecBufferDesc {
-                ulVersion: SECBUFFER_VERSION,
-                cBuffers: 2,
-                pBuffers: outbufs.as_mut_ptr(),
-            };
-
-            let mut attributes = 0;
-
-            let status = InitializeSecurityContextW(&cred.0 as *const _ as *mut _,
-                                                    &mut self.0,
-                                                    domain,
-                                                    INIT_REQUESTS,
-                                                    0,
-                                                    0,
-                                                    &mut inbuf_desc,
-                                                    0,
-                                                    ptr::null_mut(),
-                                                    &mut outbuf_desc,
-                                                    &mut attributes,
-                                                    ptr::null_mut());
-
-            if !outbufs[1].pvBuffer.is_null() {
-                FreeContextBuffer(outbufs[1].pvBuffer);
-            }
-
-            match status {
-                SEC_I_CONTINUE_NEEDED => {
-                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA {
-                        buf.len() - inbufs[1].cbBuffer as usize
-                    } else {
-                        buf.len()
-                    };
-                    let to_write = ContextBuffer(outbufs[0]);
-                    Ok(InitializeResponse::ContinueNeeded(nread, to_write))
-                }
-                SEC_E_INCOMPLETE_MESSAGE => Ok(InitializeResponse::IncompleteMessage),
-                SEC_E_OK => {
-                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA {
-                        buf.len() - inbufs[1].cbBuffer as usize
-                    } else {
-                        buf.len()
-                    };
-                    let to_write = if outbufs[0].pvBuffer.is_null() {
-                        None
-                    } else {
-                        Some(ContextBuffer(outbufs[0]))
-                    };
-                    Ok(InitializeResponse::Ok(nread, to_write))
-                }
-                _ => Err(Error(status)),
             }
         }
     }
@@ -409,6 +315,109 @@ impl<S> TlsStream<S>
         self.initialize()
     }
 
+    fn step_initialize(&mut self) -> Result<()> {
+        unsafe {
+            let domain = self.domain
+                             .as_ref()
+                             .map(|b| b.as_ptr() as *mut u16)
+                             .unwrap_or(ptr::null_mut());
+
+            let inbufs = &mut [SecBuffer {
+                                   cbBuffer: self.enc_in.position() as c_ulong,
+                                   BufferType: SECBUFFER_TOKEN,
+                                   pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
+                               },
+                               SecBuffer {
+                                   cbBuffer: 0,
+                                   BufferType: SECBUFFER_EMPTY,
+                                   pvBuffer: ptr::null_mut(),
+                               }];
+            let mut inbuf_desc = SecBufferDesc {
+                ulVersion: SECBUFFER_VERSION,
+                cBuffers: 2,
+                pBuffers: inbufs.as_mut_ptr(),
+            };
+
+            let outbufs = &mut [SecBuffer {
+                                    cbBuffer: 0,
+                                    BufferType: SECBUFFER_TOKEN,
+                                    pvBuffer: ptr::null_mut(),
+                                },
+                                SecBuffer {
+                                    cbBuffer: 0,
+                                    BufferType: SECBUFFER_ALERT,
+                                    pvBuffer: ptr::null_mut(),
+                                }];
+            let mut outbuf_desc = SecBufferDesc {
+                ulVersion: SECBUFFER_VERSION,
+                cBuffers: 2,
+                pBuffers: outbufs.as_mut_ptr(),
+            };
+
+            let mut attributes = 0;
+
+            let status = InitializeSecurityContextW(&mut self.cred.0,
+                                                    &mut self.context.0,
+                                                    domain,
+                                                    INIT_REQUESTS,
+                                                    0,
+                                                    0,
+                                                    &mut inbuf_desc,
+                                                    0,
+                                                    ptr::null_mut(),
+                                                    &mut outbuf_desc,
+                                                    &mut attributes,
+                                                    ptr::null_mut());
+
+            if !outbufs[1].pvBuffer.is_null() {
+                FreeContextBuffer(outbufs[1].pvBuffer);
+            }
+
+            match status {
+                SEC_I_CONTINUE_NEEDED => {
+                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA {
+                        self.enc_in.position() as usize - inbufs[1].cbBuffer as usize
+                    } else {
+                        self.enc_in.position() as usize
+                    };
+                    let to_write = ContextBuffer(outbufs[0]);
+
+                    self.consume_enc_in(nread);
+                    self.needs_read = self.enc_in.position() == 0;
+                    self.out_buf.get_mut().extend_from_slice(&to_write);
+                }
+                SEC_E_INCOMPLETE_MESSAGE => self.needs_read = true,
+                SEC_E_OK => {
+                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA {
+                        self.enc_in.position() as usize - inbufs[1].cbBuffer as usize
+                    } else {
+                        self.enc_in.position() as usize
+                    };
+                    let to_write = if outbufs[0].pvBuffer.is_null() {
+                        None
+                    } else {
+                        Some(ContextBuffer(outbufs[0]))
+                    };
+
+                    self.consume_enc_in(nread);
+                    self.needs_read = self.enc_in.position() == 0;
+                    if let Some(to_write) = to_write {
+                        self.out_buf.get_mut().extend_from_slice(&to_write);
+                    }
+                    if self.enc_in.position() != 0 {
+                        try!(self.decrypt());
+                    }
+                    self.sizes = try!(self.context.stream_sizes());
+                    if let State::Initializing { ref mut more_calls, .. } = self.state {
+                        *more_calls = false;
+                    }
+                }
+                _ => return Err(Error(status)),
+            }
+            Ok(())
+        }
+    }
+
     fn initialize(&mut self) -> io::Result<()> {
         while let State::Initializing { mut needs_flush, more_calls, shutting_down } = self.state {
             if try!(self.write_out()) > 0 {
@@ -442,34 +451,7 @@ impl<S> TlsStream<S>
                 }
             }
 
-            let end = self.enc_in.position() as usize;
-            match self.context.continue_initialize(&self.cred,
-                                                   self.domain.as_ref().map(|d| &d[..]),
-                                                   &mut self.enc_in.get_mut()[..end]) {
-                Ok(InitializeResponse::ContinueNeeded(nread, buf)) => {
-                    self.consume_enc_in(nread);
-                    self.needs_read = self.enc_in.position() == 0;
-                    self.out_buf.get_mut().extend_from_slice(&buf);
-                }
-                Ok(InitializeResponse::Ok(nread, buf)) => {
-                    self.consume_enc_in(nread);
-                    self.needs_read = self.enc_in.position() == 0;
-                    if let Some(buf) = buf {
-                        self.out_buf.get_mut().extend_from_slice(&buf);
-                    }
-                    if self.enc_in.position() != 0 {
-                        try!(self.decrypt().map_err(Error::into_io));
-                    }
-                    self.sizes = try!(self.context.stream_sizes().map_err(Error::into_io));
-                    if let State::Initializing { ref mut more_calls, .. } = self.state {
-                        *more_calls = false;
-                    }
-                }
-                Ok(InitializeResponse::IncompleteMessage) => {
-                    self.needs_read = true;
-                }
-                Err(e) => return Err(e.into_io()),
-            }
+            try!(self.step_initialize().map_err(Error::into_io));
         }
 
         Ok(())
