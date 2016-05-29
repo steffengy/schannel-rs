@@ -23,7 +23,7 @@ use winapi::{CredHandle, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION, 
              SEC_I_CONTINUE_NEEDED, SecPkgContext_StreamSizes, SECPKG_ATTR_STREAM_SIZES,
              SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA,
              SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER, SEC_I_CONTEXT_EXPIRED,
-             SEC_I_RENEGOTIATE, SCHANNEL_SHUTDOWN};
+             SEC_I_RENEGOTIATE, SCHANNEL_SHUTDOWN, SEC_E_CONTEXT_EXPIRED};
 
 const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
                                ISC_REQ_INTEGRITY |
@@ -149,13 +149,6 @@ impl TlsStreamBuilder {
             dec_in: Cursor::new(Vec::new()),
             enc_in: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.to_owned()),
-            sizes: SecPkgContext_StreamSizes {
-                cbHeader: 0,
-                cbTrailer: 0,
-                cbMaximumMessage: 0,
-                cBuffers: 0,
-                cbBlockSize: 0,
-            },
         };
         try!(stream.initialize());
 
@@ -252,7 +245,9 @@ enum State {
         more_calls: bool,
         shutting_down: bool,
     },
-    Streaming,
+    Streaming {
+        sizes: SecPkgContext_StreamSizes,
+    },
     Shutdown,
 }
 
@@ -266,7 +261,6 @@ pub struct TlsStream<S> {
     dec_in: Cursor<Vec<u8>>,
     enc_in: Cursor<Vec<u8>>,
     out_buf: Cursor<Vec<u8>>,
-    sizes: SecPkgContext_StreamSizes,
 }
 
 impl<S> TlsStream<S>
@@ -312,7 +306,7 @@ impl<S> TlsStream<S>
             }
         }
 
-        self.initialize()
+        self.initialize().map(|_| ())
     }
 
     fn step_initialize(&mut self) -> Result<()> {
@@ -407,7 +401,6 @@ impl<S> TlsStream<S>
                     if self.enc_in.position() != 0 {
                         try!(self.decrypt());
                     }
-                    self.sizes = try!(self.context.stream_sizes());
                     if let State::Initializing { ref mut more_calls, .. } = self.state {
                         *more_calls = false;
                     }
@@ -418,43 +411,49 @@ impl<S> TlsStream<S>
         }
     }
 
-    fn initialize(&mut self) -> io::Result<()> {
-        while let State::Initializing { mut needs_flush, more_calls, shutting_down } = self.state {
-            if try!(self.write_out()) > 0 {
-                needs_flush = true;
-                if let State::Initializing { needs_flush: ref mut n, .. } = self.state {
-                    *n = needs_flush;
+    fn initialize(&mut self) -> io::Result<Option<SecPkgContext_StreamSizes>> {
+        loop {
+            match self.state {
+                State::Initializing { mut needs_flush, more_calls, shutting_down } => {
+                    if try!(self.write_out()) > 0 {
+                        needs_flush = true;
+                        if let State::Initializing { needs_flush: ref mut n, .. } = self.state {
+                            *n = needs_flush;
+                        }
+                    }
+
+                    if needs_flush {
+                        try!(self.stream.flush());
+                        if let State::Initializing { ref mut needs_flush, .. } = self.state {
+                            *needs_flush = false;
+                        }
+                    }
+
+                    if !more_calls {
+                        self.state = if shutting_down {
+                            State::Shutdown
+                        } else {
+                            State::Streaming {
+                                sizes: try!(self.context.stream_sizes().map_err(Error::into_io)),
+                            }
+                        };
+
+                        continue;
+                    }
+
+                    if self.needs_read {
+                        if try!(self.read_in()) == 0 {
+                            return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
+                                                      "unexpected EOF during handshake"));
+                        }
+                    }
+
+                    try!(self.step_initialize().map_err(Error::into_io));
                 }
+                State::Streaming { sizes } => return Ok(Some(sizes)),
+                State::Shutdown => return Ok(None),
             }
-
-            if needs_flush {
-                try!(self.stream.flush());
-                if let State::Initializing { ref mut needs_flush, .. } = self.state {
-                    *needs_flush = false;
-                }
-            }
-
-            if !more_calls {
-                self.state = if shutting_down {
-                    State::Shutdown
-                } else {
-                    State::Streaming
-                };
-
-                break;
-            }
-
-            if self.needs_read {
-                if try!(self.read_in()) == 0 {
-                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
-                                              "unexpected EOF during handshake"));
-                }
-            }
-
-            try!(self.step_initialize().map_err(Error::into_io));
         }
-
-        Ok(())
     }
 
     fn write_out(&mut self) -> io::Result<usize> {
@@ -571,36 +570,36 @@ impl<S> TlsStream<S>
         }
     }
 
-    fn encrypt(&mut self, buf: &[u8]) -> Result<()> {
-        assert!(buf.len() <= self.sizes.cbMaximumMessage as usize);
+    fn encrypt(&mut self, buf: &[u8], sizes: &SecPkgContext_StreamSizes) -> Result<()> {
+        assert!(buf.len() <= sizes.cbMaximumMessage as usize);
 
         unsafe {
-            let len = self.sizes.cbHeader as usize + buf.len() + self.sizes.cbTrailer as usize;
+            let len = sizes.cbHeader as usize + buf.len() + sizes.cbTrailer as usize;
 
             if self.out_buf.get_ref().len() < len {
                 self.out_buf.get_mut().resize(len, 0);
             }
 
-            let message_start = self.sizes.cbHeader as usize;
+            let message_start = sizes.cbHeader as usize;
             self.out_buf
                 .get_mut()[message_start..message_start + buf.len()]
                 .clone_from_slice(buf);
 
             let buf_start = self.out_buf.get_mut().as_mut_ptr();
             let bufs = &mut [SecBuffer {
-                                 cbBuffer: self.sizes.cbHeader,
+                                 cbBuffer: sizes.cbHeader,
                                  BufferType: SECBUFFER_STREAM_HEADER,
                                  pvBuffer: buf_start as *mut _,
                              },
                              SecBuffer {
                                  cbBuffer: buf.len() as c_ulong,
                                  BufferType: SECBUFFER_DATA,
-                                 pvBuffer: buf_start.offset(self.sizes.cbHeader as isize) as *mut _,
+                                 pvBuffer: buf_start.offset(sizes.cbHeader as isize) as *mut _,
                              },
                              SecBuffer {
-                                 cbBuffer: self.sizes.cbTrailer,
+                                 cbBuffer: sizes.cbTrailer,
                                  BufferType: SECBUFFER_STREAM_TRAILER,
-                                 pvBuffer: buf_start.offset(self.sizes.cbHeader as isize + buf.len() as isize) as *mut _,
+                                 pvBuffer: buf_start.offset(sizes.cbHeader as isize + buf.len() as isize) as *mut _,
                              },
                              SecBuffer {
                                  cbBuffer: 0,
@@ -634,16 +633,19 @@ impl<S> Write for TlsStream<S>
     where S: Read + Write
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        try!(self.initialize());
+        let sizes = match try!(self.initialize()) {
+            Some(sizes) => sizes,
+            None => return Err(Error(SEC_E_CONTEXT_EXPIRED).into_io()),
+        };
 
-        let len = cmp::min(buf.len(), self.sizes.cbMaximumMessage as usize);
+        let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
         // if we have pending output data, it must have been because a previous
         // attempt to send this data ran into an error. Specifically in the
         // case of WouldBlock errors, we expect another call to write with the
         // same data.
         if self.out_buf.position() == self.out_buf.get_ref().len() as u64 {
-            try!(self.encrypt(&buf[..len]).map_err(Error::into_io));
+            try!(self.encrypt(&buf[..len], &sizes).map_err(Error::into_io));
         }
         try!(self.write_out());
 
