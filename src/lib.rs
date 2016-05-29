@@ -258,8 +258,11 @@ pub struct TlsStream<S> {
     stream: S,
     state: State,
     needs_read: bool,
+    // valid from position() to len()
     dec_in: Cursor<Vec<u8>>,
+    // valid from 0 to position()
     enc_in: Cursor<Vec<u8>>,
+    // valid from position() to len()
     out_buf: Cursor<Vec<u8>>,
 }
 
