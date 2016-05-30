@@ -1037,6 +1037,20 @@ mod test {
     }
 
     #[test]
+    fn wrong_host_cert() {
+        let creds = SchannelCredBuilder::new()
+            .acquire(Direction::Outbound)
+            .unwrap();
+        let stream = TcpStream::connect("wrong.host.badssl.com:443").unwrap();
+        let err = TlsStreamBuilder::new()
+            .domain("wrong.host.badssl.com")
+            .initialize(creds, stream)
+            .err()
+            .unwrap();
+        assert_eq!(err.raw_os_error().unwrap(), winapi::CERT_E_CN_NO_MATCH as i32);
+    }
+
+    #[test]
     fn shutdown() {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
