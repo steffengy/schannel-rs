@@ -1,7 +1,9 @@
+extern crate kernel32;
 extern crate libc;
 extern crate secur32;
 extern crate winapi;
 
+use kernel32::{FormatMessageW, LocalFree};
 use libc::c_ulong;
 use secur32::{AcquireCredentialsHandleA, FreeCredentialsHandle, InitializeSecurityContextW,
               DeleteSecurityContext, FreeContextBuffer, QueryContextAttributesW, DecryptMessage,
@@ -23,7 +25,9 @@ use winapi::{CredHandle, DWORD, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VE
              SEC_I_CONTINUE_NEEDED, SecPkgContext_StreamSizes, SECPKG_ATTR_STREAM_SIZES,
              SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA,
              SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER, SEC_I_CONTEXT_EXPIRED,
-             SEC_I_RENEGOTIATE, SCHANNEL_SHUTDOWN, SEC_E_CONTEXT_EXPIRED};
+             SEC_I_RENEGOTIATE, SCHANNEL_SHUTDOWN, SEC_E_CONTEXT_EXPIRED,
+             FORMAT_MESSAGE_ALLOCATE_BUFFER, FORMAT_MESSAGE_FROM_SYSTEM,
+             FORMAT_MESSAGE_IGNORE_INSERTS};
 
 const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
                                ISC_REQ_INTEGRITY |
@@ -38,16 +42,20 @@ pub struct Error(SECURITY_STATUS);
 
 impl fmt::Debug for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_tuple("Error")
-           .field(&format_args!("{:#x}", self.0))
-           .finish()
+        let mut builder = fmt.debug_struct("Error");
+        builder.field("code", &format_args!("{:#x}", self.0));
+        if let Some(message) = self.message() {
+            builder.field("message", &message.trim());
+        }
+        builder.finish()
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        match self.0 {
-            n => write!(fmt, "unknown error {:#x}", n),
+        match self.message() {
+            Some(message) => fmt.write_str(message.trim()),
+            None => write!(fmt, "unknown error {:#x}", self.0),
         }
     }
 }
@@ -61,6 +69,34 @@ impl error::Error for Error {
 impl Error {
     fn into_io(self) -> io::Error {
         io::Error::new(io::ErrorKind::Other, self)
+    }
+
+    fn message(&self) -> Option<String> {
+        unsafe {
+            let mut buf: *mut u16 = ptr::null_mut();
+
+            let flags = FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS;
+            let ret = FormatMessageW(flags,
+                                     ptr::null_mut(),
+                                     self.0 as DWORD,
+                                     0,
+                                     &mut buf as *mut _ as *mut _,
+                                     0,
+                                     ptr::null_mut());
+
+            if ret == 0 {
+                return None;
+            }
+
+            let slice = slice::from_raw_parts(buf, ret as usize);
+            let s = String::from_utf16(slice);
+
+            LocalFree(buf as *mut _);
+
+            s.ok()
+        }
     }
 }
 
