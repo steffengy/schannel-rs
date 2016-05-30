@@ -115,6 +115,7 @@ pub enum Direction {
 }
 
 /// https://msdn.microsoft.com/en-us/library/windows/desktop/aa375549(v=vs.85).aspx
+#[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 pub enum Algorithm {
     /// Advanced Encryption Standard (AES).
@@ -198,9 +199,9 @@ impl SchannelCredBuilder {
 
     /// Sets the algorithms supported for sessions created from this builder.
     pub fn supported_algorithms(mut self,
-                                supported_algorithms: Vec<Algorithm>)
+                                supported_algorithms: &[Algorithm])
                                 -> SchannelCredBuilder {
-        self.supported_algorithms = Some(supported_algorithms);
+        self.supported_algorithms = Some(supported_algorithms.to_owned());
         self
     }
 
@@ -957,12 +958,8 @@ mod test {
 
     #[test]
     fn invalid_algorithms() {
-        let algorithms = vec![
-            Algorithm::Rc2,
-            Algorithm::Ecdsa,
-        ];
         let creds = SchannelCredBuilder::new()
-            .supported_algorithms(algorithms)
+            .supported_algorithms(&[Algorithm::Rc2, Algorithm::Ecdsa])
             .acquire(Direction::Outbound);
         assert_eq!(creds.err().unwrap().0,
                    winapi::SEC_E_ALGORITHM_MISMATCH as winapi::DWORD);
@@ -970,12 +967,8 @@ mod test {
 
     #[test]
     fn valid_algorithms() {
-        let algorithms = vec![
-            Algorithm::Aes128,
-            Algorithm::Ecdsa,
-        ];
         let creds = SchannelCredBuilder::new()
-            .supported_algorithms(algorithms)
+            .supported_algorithms(&[Algorithm::Aes128, Algorithm::Ecdsa])
             .acquire(Direction::Outbound)
             .unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
