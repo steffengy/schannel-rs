@@ -109,6 +109,7 @@ impl Drop for CertChainContext {
     }
 }
 
+#[derive(Copy, Debug, Clone, PartialEq, Eq)]
 pub enum Direction {
     Inbound,
     Outbound,
@@ -188,13 +189,49 @@ pub enum Algorithm {
     TripleDes112 = winapi::CALG_3DES_112,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum Protocol {
+    /// Secure Sockets Layer 3.0
+    Ssl3,
+    /// Transport Layer Security 1.0
+    Tls10,
+    /// Transport Layer Security 1.1
+    Tls11,
+    /// Transport Layer Security 1.2
+    Tls12,
+}
+
+impl Protocol {
+    fn dword(self, direction: Direction) -> winapi::DWORD {
+        if direction == Direction::Inbound {
+            match self {
+                Protocol::Ssl3 => winapi::SP_PROT_SSL3_SERVER,
+                Protocol::Tls10 => winapi::SP_PROT_TLS1_0_SERVER,
+                Protocol::Tls11 => winapi::SP_PROT_TLS1_1_SERVER,
+                Protocol::Tls12 => winapi::SP_PROT_TLS1_2_SERVER,
+            }
+        } else {
+            match self {
+                Protocol::Ssl3 => winapi::SP_PROT_SSL3_CLIENT,
+                Protocol::Tls10 => winapi::SP_PROT_TLS1_0_CLIENT,
+                Protocol::Tls11 => winapi::SP_PROT_TLS1_1_CLIENT,
+                Protocol::Tls12 => winapi::SP_PROT_TLS1_2_CLIENT,
+            }
+        }
+    }
+}
+
 pub struct SchannelCredBuilder {
     supported_algorithms: Option<Vec<Algorithm>>,
+    enabled_protocols: Option<Vec<Protocol>>,
 }
 
 impl SchannelCredBuilder {
     pub fn new() -> SchannelCredBuilder {
-        SchannelCredBuilder { supported_algorithms: None }
+        SchannelCredBuilder {
+            supported_algorithms: None,
+            enabled_protocols: None,
+        }
     }
 
     /// Sets the algorithms supported for sessions created from this builder.
@@ -202,6 +239,12 @@ impl SchannelCredBuilder {
                                 supported_algorithms: &[Algorithm])
                                 -> SchannelCredBuilder {
         self.supported_algorithms = Some(supported_algorithms.to_owned());
+        self
+    }
+
+    /// Sets the protocols enabled for sessions created from this builder.
+    pub fn enabled_protocols(mut self, enabled_protocols: &[Protocol]) -> SchannelCredBuilder {
+        self.enabled_protocols = Some(enabled_protocols.to_owned());
         self
     }
 
@@ -214,6 +257,11 @@ impl SchannelCredBuilder {
             if let Some(ref supported_algorithms) = self.supported_algorithms {
                 cred_data.cSupportedAlgs = supported_algorithms.len() as winapi::DWORD;
                 cred_data.palgSupportedAlgs = supported_algorithms.as_ptr() as *mut _;
+            }
+            if let Some(ref enabled_protocols) = self.enabled_protocols {
+                cred_data.grbitEnabledProtocols = enabled_protocols.iter()
+                                                                   .map(|p| p.dword(direction))
+                                                                   .fold(0, |acc, p| acc | p);
             }
 
             let direction = match direction {
@@ -973,6 +1021,40 @@ mod test {
     fn valid_algorithms() {
         let creds = SchannelCredBuilder::new()
             .supported_algorithms(&[Algorithm::Aes128, Algorithm::Ecdsa])
+            .acquire(Direction::Outbound)
+            .unwrap();
+        let stream = TcpStream::connect("google.com:443").unwrap();
+        let mut stream = TlsStreamBuilder::new()
+            .domain("google.com")
+            .initialize(creds, stream)
+            .unwrap();
+        stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
+        let mut out = vec![];
+        stream.read_to_end(&mut out).unwrap();
+        assert!(out.starts_with(b"HTTP/1.0 200 OK"));
+        assert!(out.ends_with(b"</html>"));
+    }
+
+    #[test]
+    fn invalid_protocol() {
+        let creds = SchannelCredBuilder::new()
+            .enabled_protocols(&[Protocol::Ssl3])
+            .acquire(Direction::Outbound)
+            .unwrap();
+        let stream = TcpStream::connect("google.com:443").unwrap();
+        let err = TlsStreamBuilder::new()
+            .domain("google.com")
+            .initialize(creds, stream)
+            .err()
+            .unwrap();
+        let err = err.into_inner().unwrap().downcast::<Error>().unwrap();
+        assert_eq!(err.0, winapi::SEC_E_UNSUPPORTED_FUNCTION as winapi::DWORD);
+    }
+
+    #[test]
+    fn valid_protocol() {
+        let creds = SchannelCredBuilder::new()
+            .enabled_protocols(&[Protocol::Tls12])
             .acquire(Direction::Outbound)
             .unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
