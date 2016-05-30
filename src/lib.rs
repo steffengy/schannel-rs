@@ -1,9 +1,12 @@
+extern crate crypt32;
 extern crate kernel32;
 extern crate libc;
 extern crate secur32;
 extern crate winapi;
 
-use kernel32::{FormatMessageW, LocalFree};
+use crypt32::{CertFreeCertificateContext, CertFreeCertificateChain, CertGetCertificateChain,
+              CertVerifyCertificateChainPolicy};
+use kernel32::{FormatMessageW, LocalFree, GetLastError};
 use libc::c_ulong;
 use secur32::{AcquireCredentialsHandleA, FreeCredentialsHandle, InitializeSecurityContextW,
               DeleteSecurityContext, FreeContextBuffer, QueryContextAttributesW, DecryptMessage,
@@ -26,13 +29,21 @@ use winapi::{CredHandle, DWORD, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VE
              SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA,
              SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER, SEC_I_CONTEXT_EXPIRED,
              SEC_I_RENEGOTIATE, SCHANNEL_SHUTDOWN, SEC_E_CONTEXT_EXPIRED,
-             FORMAT_MESSAGE_ALLOCATE_BUFFER, FORMAT_MESSAGE_FROM_SYSTEM,
-             FORMAT_MESSAGE_IGNORE_INSERTS, SCH_USE_STRONG_CRYPTO};
+             ISC_REQ_MANUAL_CRED_VALIDATION, SECPKG_ATTR_REMOTE_CERT_CONTEXT, CERT_CONTEXT,
+             CERT_CHAIN_CONTEXT, CERT_CHAIN_PARA, FORMAT_MESSAGE_ALLOCATE_BUFFER,
+             FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS, TRUE,
+             CERT_CHAIN_CACHE_END_CERT, CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY,
+             USAGE_MATCH_TYPE_OR, szOID_PKIX_KP_SERVER_AUTH, szOID_SERVER_GATED_CRYPTO,
+             szOID_SGC_NETSCAPE, LPSTR, CERT_CHAIN_POLICY_SSL, CERT_CHAIN_POLICY_PARA,
+             CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS, SSL_EXTRA_CERT_CHAIN_POLICY_PARA,
+             AUTHTYPE_SERVER, CERT_CHAIN_POLICY_STATUS, FALSE, ERROR_SUCCESS, LPCSTR,
+             SCH_USE_STRONG_CRYPTO};
 
 const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
                                ISC_REQ_INTEGRITY |
                                ISC_REQ_REPLAY_DETECT |
                                ISC_REQ_SEQUENCE_DETECT |
+                               ISC_REQ_MANUAL_CRED_VALIDATION |
                                ISC_REQ_ALLOCATE_MEMORY |
                                ISC_REQ_STREAM;
 
@@ -67,6 +78,11 @@ impl error::Error for Error {
 }
 
 impl Error {
+    fn last_error() -> Error {
+        let e = unsafe { GetLastError() };
+        Error(e as SECURITY_STATUS)
+    }
+
     fn into_io(self) -> io::Error {
         io::Error::new(io::ErrorKind::Other, self)
     }
@@ -97,6 +113,22 @@ impl Error {
 
             s.ok()
         }
+    }
+}
+
+struct CertContext(*mut CERT_CONTEXT);
+
+impl Drop for CertContext {
+    fn drop(&mut self) {
+        unsafe { CertFreeCertificateContext(self.0); }
+    }
+}
+
+struct CertChainContext(*const CERT_CHAIN_CONTEXT);
+
+impl Drop for CertChainContext {
+    fn drop(&mut self) {
+        unsafe { CertFreeCertificateChain(self.0); }
     }
 }
 
@@ -334,6 +366,20 @@ impl SecurityContext {
                                                  &mut stream_sizes as *mut _ as *mut _);
             if status == SEC_E_OK {
                 Ok(stream_sizes)
+            } else {
+                Err(Error(status))
+            }
+        }
+    }
+
+    fn remote_cert(&mut self) -> Result<CertContext> {
+        unsafe {
+            let mut cert_context = mem::uninitialized();
+            let status = QueryContextAttributesW(&mut self.0,
+                                                 SECPKG_ATTR_REMOTE_CERT_CONTEXT,
+                                                 &mut cert_context as *mut _ as *mut _);
+            if status == SEC_E_OK {
+                Ok(CertContext(cert_context))
             } else {
                 Err(Error(status))
             }
@@ -581,10 +627,86 @@ impl<S> TlsStream<S>
 
                     try!(self.step_initialize().map_err(Error::into_io));
                 }
-                State::Streaming { sizes } => return Ok(Some(sizes)),
+                State::Streaming { sizes } => {
+                    try!(self.validate().map_err(Error::into_io));
+                    return Ok(Some(sizes));
+                }
                 State::Shutdown => return Ok(None),
             }
         }
+    }
+
+    fn validate(&mut self) -> Result<()> {
+        let cert_context = try!(self.context.remote_cert());
+
+        let cert_chain = unsafe {
+            let flags = CERT_CHAIN_CACHE_END_CERT |
+                CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY;
+
+            let mut para: CERT_CHAIN_PARA = mem::zeroed();
+            para.cbSize = mem::size_of_val(&para) as DWORD;
+            para.RequestedUsage.dwType = USAGE_MATCH_TYPE_OR;
+
+            let mut pkix_kp_server_auth = szOID_PKIX_KP_SERVER_AUTH.as_bytes().to_owned();
+            pkix_kp_server_auth.push(0);
+            let mut server_gated_crypto = szOID_SERVER_GATED_CRYPTO.as_bytes().to_owned();
+            server_gated_crypto.push(0);
+            let mut sgc_netscape = szOID_SGC_NETSCAPE.as_bytes().to_owned();
+            sgc_netscape.push(0);
+            let mut identifiers = [pkix_kp_server_auth.as_ptr() as LPSTR,
+                               server_gated_crypto.as_ptr() as LPSTR,
+                               sgc_netscape.as_ptr() as LPSTR];
+            para.RequestedUsage.Usage.cUsageIdentifier = identifiers.len() as DWORD;
+            para.RequestedUsage.Usage.rgpszUsageIdentifier = identifiers.as_mut_ptr();
+
+            let mut cert_chain = mem::uninitialized();
+
+            let res = CertGetCertificateChain(ptr::null_mut(),
+                                              cert_context.0,
+                                              ptr::null_mut(),
+                                              ptr::null_mut(),
+                                              &mut para,
+                                              flags,
+                                              ptr::null_mut(),
+                                              &mut cert_chain);
+
+            if res == TRUE {
+                CertChainContext(cert_chain)
+            } else {
+                return Err(Error::last_error());
+            }
+        };
+
+        unsafe {
+            let mut extra_para: SSL_EXTRA_CERT_CHAIN_POLICY_PARA = mem::zeroed();
+            extra_para.cbSize = mem::size_of_val(&extra_para) as DWORD;
+            extra_para.dwAuthType = AUTHTYPE_SERVER;
+            if let Some(ref mut name) = self.domain {
+                extra_para.pwszServerName = name.as_mut_ptr();
+            }
+
+            let mut para: CERT_CHAIN_POLICY_PARA = mem::zeroed();
+            para.cbSize = mem::size_of_val(&para) as DWORD;
+            para.dwFlags = CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS;
+            para.pvExtraPolicyPara = &mut extra_para as *mut _ as *mut _;
+
+            let mut status: CERT_CHAIN_POLICY_STATUS = mem::zeroed();
+            status.cbSize = mem::size_of_val(&status) as DWORD;
+
+            let res = CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL as LPCSTR,
+                                                       cert_chain.0,
+                                                       &mut para,
+                                                       &mut status);
+            if res == FALSE {
+                return Err(Error::last_error());
+            }
+
+            if status.dwError != ERROR_SUCCESS {
+                return Err(Error(status.dwError as SECURITY_STATUS));
+            }
+        }
+
+        Ok(())
     }
 
     fn write_out(&mut self) -> io::Result<usize> {
