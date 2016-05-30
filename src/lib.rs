@@ -87,8 +87,9 @@ impl SchannelCredBuilder {
                 Direction::Outbound => SECPKG_CRED_OUTBOUND,
             };
 
+            let mut unisp_name = UNISP_NAME.bytes().chain(Some(0u8)).collect::<Vec<u8>>();
             match AcquireCredentialsHandleA(ptr::null_mut(),
-                                            UNISP_NAME.as_ptr() as *mut _,
+                                            unisp_name.as_mut_slice() as *mut _ as *mut _,
                                             direction,
                                             ptr::null_mut(),
                                             &mut cred_data as *mut _ as *mut _,
