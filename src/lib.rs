@@ -966,6 +966,7 @@ mod test {
     }
 
     #[test]
+    #[ignore] // google's inconsistent about disallowing sslv3
     fn invalid_protocol() {
         let creds = SchannelCredBuilder::new()
             .enabled_protocols(&[Protocol::Ssl3])
