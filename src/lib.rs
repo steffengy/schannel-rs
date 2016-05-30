@@ -15,13 +15,10 @@ use std::ptr;
 use std::result;
 use std::slice;
 
-const INIT_REQUESTS: c_ulong = winapi::ISC_REQ_CONFIDENTIALITY |
-                               winapi::ISC_REQ_INTEGRITY |
-                               winapi::ISC_REQ_REPLAY_DETECT |
-                               winapi::ISC_REQ_SEQUENCE_DETECT |
-                               winapi::ISC_REQ_MANUAL_CRED_VALIDATION |
-                               winapi::ISC_REQ_ALLOCATE_MEMORY |
-                               winapi::ISC_REQ_STREAM;
+const INIT_REQUESTS: c_ulong =
+    winapi::ISC_REQ_CONFIDENTIALITY | winapi::ISC_REQ_INTEGRITY | winapi::ISC_REQ_REPLAY_DETECT |
+    winapi::ISC_REQ_SEQUENCE_DETECT | winapi::ISC_REQ_MANUAL_CRED_VALIDATION |
+    winapi::ISC_REQ_ALLOCATE_MEMORY | winapi::ISC_REQ_STREAM;
 
 pub type Result<T> = result::Result<T, Error>;
 
@@ -68,8 +65,8 @@ impl Error {
             let mut buf: *mut u16 = ptr::null_mut();
 
             let flags = winapi::FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                winapi::FORMAT_MESSAGE_FROM_SYSTEM |
-                winapi::FORMAT_MESSAGE_IGNORE_INSERTS;
+                        winapi::FORMAT_MESSAGE_FROM_SYSTEM |
+                        winapi::FORMAT_MESSAGE_IGNORE_INSERTS;
             let ret = kernel32::FormatMessageW(flags,
                                                ptr::null_mut(),
                                                self.0 as winapi::DWORD,
@@ -96,7 +93,9 @@ struct CertContext(*mut winapi::CERT_CONTEXT);
 
 impl Drop for CertContext {
     fn drop(&mut self) {
-        unsafe { crypt32::CertFreeCertificateContext(self.0); }
+        unsafe {
+            crypt32::CertFreeCertificateContext(self.0);
+        }
     }
 }
 
@@ -104,7 +103,9 @@ struct CertChainContext(*const winapi::CERT_CHAIN_CONTEXT);
 
 impl Drop for CertChainContext {
     fn drop(&mut self) {
-        unsafe { crypt32::CertFreeCertificateChain(self.0); }
+        unsafe {
+            crypt32::CertFreeCertificateChain(self.0);
+        }
     }
 }
 
@@ -192,19 +193,18 @@ pub struct SchannelCredBuilder {
 
 impl SchannelCredBuilder {
     pub fn new() -> SchannelCredBuilder {
-        SchannelCredBuilder {
-            supported_algorithms: None,
-        }
+        SchannelCredBuilder { supported_algorithms: None }
     }
 
     /// Specify the supported algorithms for connections made with credentials produced by this
     /// builder. If no algorithms are specified (i.e. if this method isn't called or the `Vec` is
     /// empty) then Schannel uses the system defaults.
-    pub fn with_supported_algorithms(mut self, supported_algorithms: Vec<Algorithm>)
+    pub fn with_supported_algorithms(mut self,
+                                     supported_algorithms: Vec<Algorithm>)
                                      -> SchannelCredBuilder {
         self.supported_algorithms = Some(supported_algorithms);
         self
-     }
+    }
 
     pub fn acquire(&self, direction: Direction) -> Result<SchannelCred> {
         unsafe {
@@ -269,7 +269,7 @@ impl TlsStreamBuilder {
     {
         let (ctxt, buf) = try!(SecurityContext::initialize(&cred,
                                                            self.domain.as_ref().map(|s| &s[..]))
-                                   .map_err(Error::into_io));
+            .map_err(Error::into_io));
 
         let mut stream = TlsStream {
             cred: cred,
@@ -430,7 +430,7 @@ impl<S> TlsStream<S>
     pub fn shutdown(&mut self) -> io::Result<()> {
         match self.state {
             State::Shutdown => return Ok(()),
-            State::Initializing { shutting_down: true, .. } => {},
+            State::Initializing { shutting_down: true, .. } => {}
             _ => {
                 unsafe {
                     let mut token = winapi::SCHANNEL_SHUTDOWN;
@@ -445,7 +445,7 @@ impl<S> TlsStream<S>
                         pBuffers: &mut buf,
                     };
                     match secur32::ApplyControlToken(&mut self.context.0, &mut desc) {
-                        winapi::SEC_E_OK => {},
+                        winapi::SEC_E_OK => {}
                         err => return Err(Error(err as winapi::DWORD).into_io()),
                     }
                 }
@@ -465,9 +465,9 @@ impl<S> TlsStream<S>
     fn step_initialize(&mut self) -> Result<()> {
         unsafe {
             let domain = self.domain
-                             .as_ref()
-                             .map(|b| b.as_ptr() as *mut u16)
-                             .unwrap_or(ptr::null_mut());
+                .as_ref()
+                .map(|b| b.as_ptr() as *mut u16)
+                .unwrap_or(ptr::null_mut());
 
             let inbufs = &mut [winapi::SecBuffer {
                                    cbBuffer: self.enc_in.position() as c_ulong,
@@ -617,8 +617,8 @@ impl<S> TlsStream<S>
 
         let cert_chain = unsafe {
             let flags = winapi::CERT_CHAIN_CACHE_END_CERT |
-                winapi::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY |
-                winapi::CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+                        winapi::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY |
+                        winapi::CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
 
             let mut para: winapi::CERT_CHAIN_PARA = mem::zeroed();
             para.cbSize = mem::size_of_val(&para) as winapi::DWORD;
@@ -631,8 +631,8 @@ impl<S> TlsStream<S>
             let mut sgc_netscape = winapi::szOID_SGC_NETSCAPE.as_bytes().to_owned();
             sgc_netscape.push(0);
             let mut identifiers = [pkix_kp_server_auth.as_ptr() as winapi::LPSTR,
-                               server_gated_crypto.as_ptr() as winapi::LPSTR,
-                               sgc_netscape.as_ptr() as winapi::LPSTR];
+                                   server_gated_crypto.as_ptr() as winapi::LPSTR,
+                                   sgc_netscape.as_ptr() as winapi::LPSTR];
             para.RequestedUsage.Usage.cUsageIdentifier = identifiers.len() as winapi::DWORD;
             para.RequestedUsage.Usage.rgpszUsageIdentifier = identifiers.as_mut_ptr();
 
@@ -812,30 +812,33 @@ impl<S> TlsStream<S>
 
             let message_start = sizes.cbHeader as usize;
             self.out_buf
-                .get_mut()[message_start..message_start + buf.len()]
+                    .get_mut()[message_start..message_start + buf.len()]
                 .clone_from_slice(buf);
 
             let buf_start = self.out_buf.get_mut().as_mut_ptr();
-            let bufs = &mut [winapi::SecBuffer {
-                                 cbBuffer: sizes.cbHeader,
-                                 BufferType: winapi::SECBUFFER_STREAM_HEADER,
-                                 pvBuffer: buf_start as *mut _,
-                             },
-                             winapi::SecBuffer {
-                                 cbBuffer: buf.len() as c_ulong,
-                                 BufferType: winapi::SECBUFFER_DATA,
-                                 pvBuffer: buf_start.offset(sizes.cbHeader as isize) as *mut _,
-                             },
-                             winapi::SecBuffer {
-                                 cbBuffer: sizes.cbTrailer,
-                                 BufferType: winapi::SECBUFFER_STREAM_TRAILER,
-                                 pvBuffer: buf_start.offset(sizes.cbHeader as isize + buf.len() as isize) as *mut _,
-                             },
-                             winapi::SecBuffer {
-                                 cbBuffer: 0,
-                                 BufferType: winapi::SECBUFFER_EMPTY,
-                                 pvBuffer: ptr::null_mut(),
-                             }];
+            let bufs =
+                &mut [winapi::SecBuffer {
+                          cbBuffer: sizes.cbHeader,
+                          BufferType: winapi::SECBUFFER_STREAM_HEADER,
+                          pvBuffer: buf_start as *mut _,
+                      },
+                      winapi::SecBuffer {
+                          cbBuffer: buf.len() as c_ulong,
+                          BufferType: winapi::SECBUFFER_DATA,
+                          pvBuffer: buf_start.offset(sizes.cbHeader as isize) as *mut _,
+                      },
+                      winapi::SecBuffer {
+                          cbBuffer: sizes.cbTrailer,
+                          BufferType: winapi::SECBUFFER_STREAM_TRAILER,
+                          pvBuffer:
+                              buf_start.offset(sizes.cbHeader as isize +
+                                      buf.len() as isize) as *mut _,
+                      },
+                      winapi::SecBuffer {
+                          cbBuffer: 0,
+                          BufferType: winapi::SECBUFFER_EMPTY,
+                          pvBuffer: ptr::null_mut(),
+                      }];
             let mut bufdesc = winapi::SecBufferDesc {
                 ulVersion: winapi::SECBUFFER_VERSION,
                 cBuffers: 4,
@@ -944,9 +947,9 @@ mod test {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let mut stream = TlsStreamBuilder::new()
-                             .domain("google.com")
-                             .initialize(creds, stream)
-                             .unwrap();
+            .domain("google.com")
+            .initialize(creds, stream)
+            .unwrap();
         stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
         let mut out = vec![];
         stream.read_to_end(&mut out).unwrap();
@@ -961,9 +964,10 @@ mod test {
             Algorithm::Ecdsa,
         ];
         let creds = SchannelCredBuilder::new()
-                        .with_supported_algorithms(algorithms)
-                        .acquire(Direction::Outbound);
-        assert_eq!(creds.err().unwrap().0, winapi::SEC_E_ALGORITHM_MISMATCH as winapi::DWORD);
+            .with_supported_algorithms(algorithms)
+            .acquire(Direction::Outbound);
+        assert_eq!(creds.err().unwrap().0,
+                   winapi::SEC_E_ALGORITHM_MISMATCH as winapi::DWORD);
     }
 
     #[test]
@@ -973,14 +977,14 @@ mod test {
             Algorithm::Ecdsa,
         ];
         let creds = SchannelCredBuilder::new()
-                        .with_supported_algorithms(algorithms)
-                        .acquire(Direction::Outbound)
-                        .unwrap();
+            .with_supported_algorithms(algorithms)
+            .acquire(Direction::Outbound)
+            .unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let mut stream = TlsStreamBuilder::new()
-                             .domain("google.com")
-                             .initialize(creds, stream)
-                             .unwrap();
+            .domain("google.com")
+            .initialize(creds, stream)
+            .unwrap();
         stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
         let mut out = vec![];
         stream.read_to_end(&mut out).unwrap();
@@ -993,10 +997,10 @@ mod test {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let err = TlsStreamBuilder::new()
-                      .domain("foobar.com")
-                      .initialize(creds, stream)
-                      .err()
-                      .unwrap();
+            .domain("foobar.com")
+            .initialize(creds, stream)
+            .err()
+            .unwrap();
         let err = err.into_inner().unwrap().downcast::<Error>().unwrap();
         assert_eq!(err.0, winapi::CERT_E_CN_NO_MATCH as winapi::DWORD);
     }
@@ -1006,9 +1010,9 @@ mod test {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let mut stream = TlsStreamBuilder::new()
-                             .domain("google.com")
-                             .initialize(creds, stream)
-                             .unwrap();
+            .domain("google.com")
+            .initialize(creds, stream)
+            .unwrap();
         stream.shutdown().unwrap();
     }
 }
