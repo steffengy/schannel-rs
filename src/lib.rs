@@ -1015,11 +1015,13 @@ mod test {
     fn bad_domain() {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
-        TlsStreamBuilder::new()
-            .domain("foobar.com")
-            .initialize(creds, stream)
-            .err()
-            .unwrap();
+        let err = TlsStreamBuilder::new()
+                      .domain("foobar.com")
+                      .initialize(creds, stream)
+                      .err()
+                      .unwrap();
+        let err = err.into_inner().unwrap().downcast::<Error>().unwrap();
+        assert_eq!(err.0, winapi::CERT_E_CN_NO_MATCH as winapi::DWORD);
     }
 
     #[test]
