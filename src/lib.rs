@@ -15,8 +15,8 @@ use std::ops::Deref;
 use std::ptr;
 use std::result;
 use std::slice;
-use winapi::{CredHandle, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION, UNISP_NAME,
-             SECPKG_CRED_OUTBOUND, SECPKG_CRED_INBOUND, SEC_E_OK, CtxtHandle,
+use winapi::{CredHandle, DWORD, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION,
+             UNISP_NAME, SECPKG_CRED_OUTBOUND, SECPKG_CRED_INBOUND, SEC_E_OK, CtxtHandle,
              ISC_REQ_CONFIDENTIALITY, ISC_REQ_INTEGRITY, ISC_REQ_REPLAY_DETECT,
              ISC_REQ_SEQUENCE_DETECT, ISC_REQ_ALLOCATE_MEMORY, ISC_REQ_STREAM, SecBuffer,
              SECBUFFER_EMPTY, SECBUFFER_TOKEN, SecBufferDesc, SECBUFFER_VERSION,
@@ -69,18 +69,108 @@ pub enum Direction {
     Outbound,
 }
 
-pub struct SchannelCredBuilder(());
+/// https://msdn.microsoft.com/en-us/library/windows/desktop/aa375549(v=vs.85).aspx
+#[repr(u32)]
+pub enum Algorithm {
+    /// Advanced Encryption Standard (AES).
+    Aes = winapi::CALG_AES,
+    /// 128 bit AES.
+    Aes128 = winapi::CALG_AES_128,
+    /// 192 bit AES.
+    Aes192 = winapi::CALG_AES_192,
+    /// 256 bit AES.
+    Aes256 = winapi::CALG_AES_256,
+    /// Temporary algorithm identifier for handles of Diffie-Hellman–agreed keys.
+    AgreedkeyAny = winapi::CALG_AGREEDKEY_ANY,
+    /// An algorithm to create a 40-bit DES key that has parity bits and zeroed key bits to make
+    /// its key length 64 bits.
+    CylinkMek = winapi::CALG_CYLINK_MEK,
+    /// DES encryption algorithm.
+    Des = winapi::CALG_DES,
+    /// DESX encryption algorithm.
+    Desx = winapi::CALG_DESX,
+    /// Diffie-Hellman ephemeral key exchange algorithm.
+    DhEphem = winapi::CALG_DH_EPHEM,
+    /// Diffie-Hellman store and forward key exchange algorithm.
+    DhSf = winapi::CALG_DH_SF,
+    /// DSA public key signature algorithm.
+    DssSign = winapi::CALG_DSS_SIGN,
+    /// Elliptic curve Diffie-Hellman key exchange algorithm.
+    Ecdh = winapi::CALG_ECDH,
+    // https://github.com/retep998/winapi-rs/issues/287
+    // /// Ephemeral elliptic curve Diffie-Hellman key exchange algorithm.
+    // EcdhEphem = winapi::CALG_ECDH_EPHEM,
+    /// Elliptic curve digital signature algorithm.
+    Ecdsa = winapi::CALG_ECDSA,
+    /// One way function hashing algorithm.
+    HashReplaceOwf = winapi::CALG_HASH_REPLACE_OWF,
+    /// Hughes MD5 hashing algorithm.
+    HughesMd5 = winapi::CALG_HUGHES_MD5,
+    /// HMAC keyed hash algorithm.
+    Hmac = winapi::CALG_HMAC,
+    /// MAC keyed hash algorithm.
+    Mac = winapi::CALG_MAC,
+    /// MD2 hashing algorithm.
+    Md2 = winapi::CALG_MD2,
+    /// MD4 hashing algorithm.
+    Md4 = winapi::CALG_MD4,
+    /// MD5 hashing algorithm.
+    Md5 = winapi::CALG_MD5,
+    /// No signature algorithm..
+    NoSign = winapi::CALG_NO_SIGN,
+    /// RC2 block encryption algorithm.
+    Rc2 = winapi::CALG_RC2,
+    /// RC4 stream encryption algorithm.
+    Rc4 = winapi::CALG_RC4,
+    /// RC5 block encryption algorithm.
+    Rc5 = winapi::CALG_RC5,
+    /// RSA public key exchange algorithm.
+    RsaKeyx = winapi::CALG_RSA_KEYX,
+    /// RSA public key signature algorithm.
+    RsaSign = winapi::CALG_RSA_SIGN,
+    /// SHA hashing algorithm.
+    Sha1 = winapi::CALG_SHA1,
+    /// 256 bit SHA hashing algorithm.
+    Sha256 = winapi::CALG_SHA_256,
+    /// 384 bit SHA hashing algorithm.
+    Sha384 = winapi::CALG_SHA_384,
+    /// 512 bit SHA hashing algorithm.
+    Sha512 = winapi::CALG_SHA_512,
+    /// Triple DES encryption algorithm.
+    TripleDes = winapi::CALG_3DES,
+    /// Two-key triple DES encryption with effective key length equal to 112 bits.
+    TripleDes112 = winapi::CALG_3DES_112,
+}
+
+pub struct SchannelCredBuilder {
+    supported_algorithms: Option<Vec<Algorithm>>,
+}
 
 impl SchannelCredBuilder {
     pub fn new() -> SchannelCredBuilder {
-        SchannelCredBuilder(())
+        SchannelCredBuilder {
+            supported_algorithms: None,
+        }
     }
+
+    /// Specify the supported algorithms for connections made with credentials produced by this
+    /// builder. If no algorithms are specified (i.e. if this method isn't called or the `Vec` is
+    /// empty) then Schannel uses the system defaults.
+    pub fn with_supported_algorithms(mut self, supported_algorithms: Vec<Algorithm>)
+                                     -> SchannelCredBuilder {
+        self.supported_algorithms = Some(supported_algorithms);
+        self
+     }
 
     pub fn acquire(&self, direction: Direction) -> Result<SchannelCred> {
         unsafe {
             let mut handle = mem::uninitialized();
             let mut cred_data: SCHANNEL_CRED = mem::zeroed();
             cred_data.dwVersion = SCHANNEL_CRED_VERSION;
+            if let Some(ref supported_algorithms) = self.supported_algorithms {
+                cred_data.cSupportedAlgs = supported_algorithms.len() as DWORD;
+                cred_data.palgSupportedAlgs = supported_algorithms.as_ptr() as *mut _;
+            }
 
             let direction = match direction {
                 Direction::Inbound => SECPKG_CRED_INBOUND,
@@ -711,10 +801,46 @@ mod test {
     use std::net::TcpStream;
 
     use super::*;
+    use winapi;
 
     #[test]
     fn basic() {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
+        let stream = TcpStream::connect("google.com:443").unwrap();
+        let mut stream = TlsStreamBuilder::new()
+                             .domain("google.com")
+                             .initialize(creds, stream)
+                             .unwrap();
+        stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
+        let mut out = vec![];
+        stream.read_to_end(&mut out).unwrap();
+        assert!(out.starts_with(b"HTTP/1.0 200 OK"));
+        assert!(out.ends_with(b"</html>"));
+    }
+
+    #[test]
+    #[allow(overflowing_literals)]
+    fn invalid_algorithms() {
+        let algorithms = vec![
+            Algorithm::Rc2,
+            Algorithm::Ecdsa,
+        ];
+        let creds = SchannelCredBuilder::new()
+                        .with_supported_algorithms(algorithms)
+                        .acquire(Direction::Outbound);
+        assert_eq!(creds.err().unwrap().0, winapi::SEC_E_ALGORITHM_MISMATCH);
+    }
+
+    #[test]
+    fn valid_algorithms() {
+        let algorithms = vec![
+            Algorithm::Aes128,
+            Algorithm::Ecdsa,
+        ];
+        let creds = SchannelCredBuilder::new()
+                        .with_supported_algorithms(algorithms)
+                        .acquire(Direction::Outbound)
+                        .unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let mut stream = TlsStreamBuilder::new()
                              .domain("google.com")
