@@ -12,6 +12,8 @@ use std::ops::Deref;
 use std::ptr;
 use std::slice;
 
+pub mod cert;
+
 const INIT_REQUESTS: c_ulong =
     winapi::ISC_REQ_CONFIDENTIALITY | winapi::ISC_REQ_INTEGRITY | winapi::ISC_REQ_REPLAY_DETECT |
     winapi::ISC_REQ_SEQUENCE_DETECT | winapi::ISC_REQ_MANUAL_CRED_VALIDATION |
@@ -273,6 +275,14 @@ impl TlsStreamBuilder {
 
 struct SecurityContext(winapi::CtxtHandle);
 
+impl Drop for SecurityContext {
+    fn drop(&mut self) {
+        unsafe {
+            secur32::DeleteSecurityContext(&mut self.0);
+        }
+    }
+}
+
 impl SecurityContext {
     fn initialize(cred: &SchannelCred,
                   domain: Option<&[u16]>)
@@ -338,14 +348,6 @@ impl SecurityContext {
             } else {
                 Err(io::Error::from_raw_os_error(status as i32))
             }
-        }
-    }
-}
-
-impl Drop for SecurityContext {
-    fn drop(&mut self) {
-        unsafe {
-            secur32::DeleteSecurityContext(&mut self.0);
         }
     }
 }
