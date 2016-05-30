@@ -1019,8 +1019,7 @@ mod test {
             .initialize(creds, stream)
             .err()
             .unwrap();
-        let err = err.into_inner().unwrap().downcast::<Error>().unwrap();
-        assert_eq!(err.0, winapi::CERT_E_EXPIRED as winapi::DWORD);
+        assert_eq!(err.raw_os_error().unwrap(), winapi::CERT_E_EXPIRED as i32);
     }
 
     #[test]
