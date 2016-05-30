@@ -27,7 +27,7 @@ use winapi::{CredHandle, DWORD, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VE
              SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER, SEC_I_CONTEXT_EXPIRED,
              SEC_I_RENEGOTIATE, SCHANNEL_SHUTDOWN, SEC_E_CONTEXT_EXPIRED,
              FORMAT_MESSAGE_ALLOCATE_BUFFER, FORMAT_MESSAGE_FROM_SYSTEM,
-             FORMAT_MESSAGE_IGNORE_INSERTS};
+             FORMAT_MESSAGE_IGNORE_INSERTS, SCH_USE_STRONG_CRYPTO};
 
 const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
                                ISC_REQ_INTEGRITY |
@@ -203,6 +203,7 @@ impl SchannelCredBuilder {
             let mut handle = mem::uninitialized();
             let mut cred_data: SCHANNEL_CRED = mem::zeroed();
             cred_data.dwVersion = SCHANNEL_CRED_VERSION;
+            cred_data.dwFlags = SCH_USE_STRONG_CRYPTO;
             if let Some(ref supported_algorithms) = self.supported_algorithms {
                 cred_data.cSupportedAlgs = supported_algorithms.len() as DWORD;
                 cred_data.palgSupportedAlgs = supported_algorithms.as_ptr() as *mut _;
