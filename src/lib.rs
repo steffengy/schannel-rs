@@ -617,7 +617,8 @@ impl<S> TlsStream<S>
 
         let cert_chain = unsafe {
             let flags = winapi::CERT_CHAIN_CACHE_END_CERT |
-                winapi::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY;
+                winapi::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY |
+                winapi::CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
 
             let mut para: winapi::CERT_CHAIN_PARA = mem::zeroed();
             para.cbSize = mem::size_of_val(&para) as winapi::DWORD;
