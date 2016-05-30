@@ -1038,11 +1038,13 @@ mod test {
             .acquire(Direction::Outbound)
             .unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
-        let stream = TlsStreamBuilder::new()
+        let err = TlsStreamBuilder::new()
             .domain("google.com")
-            .initialize(creds, stream);
-        assert_eq!(format!("{:?}", stream.err().unwrap()),
-                   "Error { repr: Custom(Custom { kind: Other, error: Error { code: 0x80090302, message: \"The function requested is not supported\" } }) }");
+            .initialize(creds, stream)
+            .err()
+            .unwrap();
+        let err = err.into_inner().unwrap().downcast::<Error>().unwrap();
+        assert_eq!(err.0, winapi::SEC_E_UNSUPPORTED_FUNCTION as winapi::DWORD);
     }
 
     #[test]
