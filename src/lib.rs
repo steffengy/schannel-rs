@@ -20,7 +20,7 @@ use std::ops::Deref;
 use std::ptr;
 use std::result;
 use std::slice;
-use winapi::{CredHandle, DWORD, SECURITY_STATUS, SCHANNEL_CRED, SCHANNEL_CRED_VERSION,
+use winapi::{CredHandle, DWORD, SCHANNEL_CRED, SCHANNEL_CRED_VERSION,
              UNISP_NAME, SECPKG_CRED_OUTBOUND, SECPKG_CRED_INBOUND, SEC_E_OK, CtxtHandle,
              ISC_REQ_CONFIDENTIALITY, ISC_REQ_INTEGRITY, ISC_REQ_REPLAY_DETECT,
              ISC_REQ_SEQUENCE_DETECT, ISC_REQ_ALLOCATE_MEMORY, ISC_REQ_STREAM, SecBuffer,
@@ -49,7 +49,7 @@ const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
 
 pub type Result<T> = result::Result<T, Error>;
 
-pub struct Error(SECURITY_STATUS);
+pub struct Error(DWORD);
 
 impl fmt::Debug for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -80,7 +80,7 @@ impl error::Error for Error {
 impl Error {
     fn last_error() -> Error {
         let e = unsafe { GetLastError() };
-        Error(e as SECURITY_STATUS)
+        Error(e)
     }
 
     fn into_io(self) -> io::Error {
@@ -257,7 +257,7 @@ impl SchannelCredBuilder {
                                             &mut handle,
                                             ptr::null_mut()) {
                 SEC_E_OK => Ok(SchannelCred(handle)),
-                err => Err(Error(err)),
+                err => Err(Error(err as DWORD)),
             }
         }
     }
@@ -353,7 +353,7 @@ impl SecurityContext {
                                              &mut attributes,
                                              ptr::null_mut()) {
                 SEC_I_CONTINUE_NEEDED => Ok((SecurityContext(ctxt), ContextBuffer(outbuf))),
-                err => Err(Error(err)),
+                err => Err(Error(err as DWORD)),
             }
         }
     }
@@ -367,7 +367,7 @@ impl SecurityContext {
             if status == SEC_E_OK {
                 Ok(stream_sizes)
             } else {
-                Err(Error(status))
+                Err(Error(status as DWORD))
             }
         }
     }
@@ -381,7 +381,7 @@ impl SecurityContext {
             if status == SEC_E_OK {
                 Ok(CertContext(cert_context))
             } else {
-                Err(Error(status))
+                Err(Error(status as DWORD))
             }
         }
     }
@@ -470,7 +470,7 @@ impl<S> TlsStream<S>
                     };
                     match ApplyControlToken(&mut self.context.0, &mut desc) {
                         SEC_E_OK => {},
-                        err => return Err(Error(err).into_io()),
+                        err => return Err(Error(err as DWORD).into_io()),
                     }
                 }
 
@@ -582,7 +582,7 @@ impl<S> TlsStream<S>
                         *more_calls = false;
                     }
                 }
-                _ => return Err(Error(status)),
+                _ => return Err(Error(status as DWORD)),
             }
             Ok(())
         }
@@ -702,7 +702,7 @@ impl<S> TlsStream<S>
             }
 
             if status.dwError != ERROR_SUCCESS {
-                return Err(Error(status.dwError as SECURITY_STATUS));
+                return Err(Error(status.dwError));
             }
         }
 
@@ -818,7 +818,7 @@ impl<S> TlsStream<S>
                     self.needs_read = self.enc_in.position() == 0;
                     Ok(())
                 }
-                e => Err(Error(e)),
+                e => Err(Error(e as DWORD)),
             }
         }
     }
@@ -872,7 +872,7 @@ impl<S> TlsStream<S>
                     self.out_buf.set_position(0);
                     Ok(())
                 }
-                err => Err(Error(err)),
+                err => Err(Error(err as DWORD)),
             }
         }
     }
@@ -888,7 +888,7 @@ impl<S> Write for TlsStream<S>
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let sizes = match try!(self.initialize()) {
             Some(sizes) => sizes,
-            None => return Err(Error(SEC_E_CONTEXT_EXPIRED).into_io()),
+            None => return Err(Error(SEC_E_CONTEXT_EXPIRED as DWORD).into_io()),
         };
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
@@ -978,7 +978,6 @@ mod test {
     }
 
     #[test]
-    #[allow(overflowing_literals)]
     fn invalid_algorithms() {
         let algorithms = vec![
             Algorithm::Rc2,
@@ -987,7 +986,7 @@ mod test {
         let creds = SchannelCredBuilder::new()
                         .with_supported_algorithms(algorithms)
                         .acquire(Direction::Outbound);
-        assert_eq!(creds.err().unwrap().0, winapi::SEC_E_ALGORITHM_MISMATCH);
+        assert_eq!(creds.err().unwrap().0, winapi::SEC_E_ALGORITHM_MISMATCH as winapi::DWORD);
     }
 
     #[test]
