@@ -6,88 +6,16 @@ extern crate winapi;
 
 use libc::c_ulong;
 use std::cmp;
-use std::error;
-use std::fmt;
 use std::io::{self, BufRead, Read, Write, Cursor};
 use std::mem;
 use std::ops::Deref;
 use std::ptr;
-use std::result;
 use std::slice;
 
 const INIT_REQUESTS: c_ulong =
     winapi::ISC_REQ_CONFIDENTIALITY | winapi::ISC_REQ_INTEGRITY | winapi::ISC_REQ_REPLAY_DETECT |
     winapi::ISC_REQ_SEQUENCE_DETECT | winapi::ISC_REQ_MANUAL_CRED_VALIDATION |
     winapi::ISC_REQ_ALLOCATE_MEMORY | winapi::ISC_REQ_STREAM;
-
-pub type Result<T> = result::Result<T, Error>;
-
-pub struct Error(winapi::DWORD);
-
-impl fmt::Debug for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = fmt.debug_struct("Error");
-        builder.field("code", &format_args!("{:#x}", self.0));
-        if let Some(message) = self.message() {
-            builder.field("message", &message.trim());
-        }
-        builder.finish()
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        match self.message() {
-            Some(message) => fmt.write_str(message.trim()),
-            None => write!(fmt, "unknown error {:#x}", self.0),
-        }
-    }
-}
-
-impl error::Error for Error {
-    fn description(&self) -> &str {
-        "an SChannel error"
-    }
-}
-
-impl Error {
-    fn last_error() -> Error {
-        let e = unsafe { kernel32::GetLastError() };
-        Error(e)
-    }
-
-    fn into_io(self) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, self)
-    }
-
-    fn message(&self) -> Option<String> {
-        unsafe {
-            let mut buf: *mut u16 = ptr::null_mut();
-
-            let flags = winapi::FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                        winapi::FORMAT_MESSAGE_FROM_SYSTEM |
-                        winapi::FORMAT_MESSAGE_IGNORE_INSERTS;
-            let ret = kernel32::FormatMessageW(flags,
-                                               ptr::null_mut(),
-                                               self.0 as winapi::DWORD,
-                                               0,
-                                               &mut buf as *mut _ as *mut _,
-                                               0,
-                                               ptr::null_mut());
-
-            if ret == 0 {
-                return None;
-            }
-
-            let slice = slice::from_raw_parts(buf, ret as usize);
-            let s = String::from_utf16(slice);
-
-            kernel32::LocalFree(buf as *mut _);
-
-            s.ok()
-        }
-    }
-}
 
 struct CertContext(*mut winapi::CERT_CONTEXT);
 
@@ -248,7 +176,7 @@ impl SchannelCredBuilder {
         self
     }
 
-    pub fn acquire(&self, direction: Direction) -> Result<SchannelCred> {
+    pub fn acquire(&self, direction: Direction) -> io::Result<SchannelCred> {
         unsafe {
             let mut handle = mem::uninitialized();
             let mut cred_data: winapi::SCHANNEL_CRED = mem::zeroed();
@@ -280,7 +208,7 @@ impl SchannelCredBuilder {
                                                      &mut handle,
                                                      ptr::null_mut()) {
                 winapi::SEC_E_OK => Ok(SchannelCred(handle)),
-                err => Err(Error(err as winapi::DWORD)),
+                err => Err(io::Error::from_raw_os_error(err as i32)),
             }
         }
     }
@@ -315,8 +243,7 @@ impl TlsStreamBuilder {
         where S: Read + Write
     {
         let (ctxt, buf) = try!(SecurityContext::initialize(&cred,
-                                                           self.domain.as_ref().map(|s| &s[..]))
-            .map_err(Error::into_io));
+                                                           self.domain.as_ref().map(|s| &s[..])));
 
         let mut stream = TlsStream {
             cred: cred,
@@ -333,6 +260,7 @@ impl TlsStreamBuilder {
             enc_in: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.to_owned()),
         };
+
         match stream.initialize() {
             Ok(_) => {}
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
@@ -348,7 +276,7 @@ struct SecurityContext(winapi::CtxtHandle);
 impl SecurityContext {
     fn initialize(cred: &SchannelCred,
                   domain: Option<&[u16]>)
-                  -> Result<(SecurityContext, ContextBuffer)> {
+                  -> io::Result<(SecurityContext, ContextBuffer)> {
         unsafe {
             let domain = domain.map(|b| b.as_ptr() as *mut u16).unwrap_or(ptr::null_mut());
 
@@ -380,12 +308,12 @@ impl SecurityContext {
                                                       &mut attributes,
                                                       ptr::null_mut()) {
                 winapi::SEC_I_CONTINUE_NEEDED => Ok((SecurityContext(ctxt), ContextBuffer(outbuf))),
-                err => Err(Error(err as winapi::DWORD)),
+                err => Err(io::Error::from_raw_os_error(err as i32)),
             }
         }
     }
 
-    fn stream_sizes(&mut self) -> Result<winapi::SecPkgContext_StreamSizes> {
+    fn stream_sizes(&mut self) -> io::Result<winapi::SecPkgContext_StreamSizes> {
         unsafe {
             let mut stream_sizes = mem::uninitialized();
             let status = secur32::QueryContextAttributesW(&mut self.0,
@@ -394,12 +322,12 @@ impl SecurityContext {
             if status == winapi::SEC_E_OK {
                 Ok(stream_sizes)
             } else {
-                Err(Error(status as winapi::DWORD))
+                Err(io::Error::from_raw_os_error(status as i32))
             }
         }
     }
 
-    fn remote_cert(&mut self) -> Result<CertContext> {
+    fn remote_cert(&mut self) -> io::Result<CertContext> {
         unsafe {
             let mut cert_context = mem::uninitialized();
             let status = secur32::QueryContextAttributesW(&mut self.0,
@@ -408,7 +336,7 @@ impl SecurityContext {
             if status == winapi::SEC_E_OK {
                 Ok(CertContext(cert_context))
             } else {
-                Err(Error(status as winapi::DWORD))
+                Err(io::Error::from_raw_os_error(status as i32))
             }
         }
     }
@@ -497,7 +425,7 @@ impl<S> TlsStream<S>
                     };
                     match secur32::ApplyControlToken(&mut self.context.0, &mut desc) {
                         winapi::SEC_E_OK => {}
-                        err => return Err(Error(err as winapi::DWORD).into_io()),
+                        err => return Err(io::Error::from_raw_os_error(err as i32)),
                     }
                 }
 
@@ -513,7 +441,7 @@ impl<S> TlsStream<S>
         self.initialize().map(|_| ())
     }
 
-    fn step_initialize(&mut self) -> Result<()> {
+    fn step_initialize(&mut self) -> io::Result<()> {
         unsafe {
             let domain = self.domain
                 .as_ref()
@@ -609,7 +537,7 @@ impl<S> TlsStream<S>
                         *more_calls = false;
                     }
                 }
-                _ => return Err(Error(status as winapi::DWORD)),
+                _ => return Err(io::Error::from_raw_os_error(status as i32)),
             }
             Ok(())
         }
@@ -638,7 +566,7 @@ impl<S> TlsStream<S>
                             State::Shutdown
                         } else {
                             State::Streaming {
-                                sizes: try!(self.context.stream_sizes().map_err(Error::into_io)),
+                                sizes: try!(self.context.stream_sizes()),
                             }
                         };
 
@@ -652,10 +580,10 @@ impl<S> TlsStream<S>
                         }
                     }
 
-                    try!(self.step_initialize().map_err(Error::into_io));
+                    try!(self.step_initialize());
                 }
                 State::Streaming { sizes } => {
-                    try!(self.validate().map_err(Error::into_io));
+                    try!(self.validate());
                     return Ok(Some(sizes));
                 }
                 State::Shutdown => return Ok(None),
@@ -663,7 +591,7 @@ impl<S> TlsStream<S>
         }
     }
 
-    fn validate(&mut self) -> Result<()> {
+    fn validate(&mut self) -> io::Result<()> {
         let cert_context = try!(self.context.remote_cert());
 
         let cert_chain = unsafe {
@@ -701,7 +629,7 @@ impl<S> TlsStream<S>
             if res == winapi::TRUE {
                 CertChainContext(cert_chain)
             } else {
-                return Err(Error::last_error());
+                return Err(io::Error::last_os_error());
             }
         };
 
@@ -726,11 +654,11 @@ impl<S> TlsStream<S>
                                                                 &mut para,
                                                                 &mut status);
             if res == winapi::FALSE {
-                return Err(Error::last_error());
+                return Err(io::Error::last_os_error());
             }
 
             if status.dwError != winapi::ERROR_SUCCESS {
-                return Err(Error(status.dwError));
+                return Err(io::Error::from_raw_os_error(status.dwError as i32));
             }
         }
 
@@ -778,7 +706,7 @@ impl<S> TlsStream<S>
         }
     }
 
-    fn decrypt(&mut self) -> Result<()> {
+    fn decrypt(&mut self) -> io::Result<()> {
         unsafe {
             let bufs = &mut [winapi::SecBuffer {
                                  cbBuffer: self.enc_in.position() as c_ulong,
@@ -846,12 +774,12 @@ impl<S> TlsStream<S>
                     self.needs_read = self.enc_in.position() == 0;
                     Ok(())
                 }
-                e => Err(Error(e as winapi::DWORD)),
+                e => Err(io::Error::from_raw_os_error(e as i32)),
             }
         }
     }
 
-    fn encrypt(&mut self, buf: &[u8], sizes: &winapi::SecPkgContext_StreamSizes) -> Result<()> {
+    fn encrypt(&mut self, buf: &[u8], sizes: &winapi::SecPkgContext_StreamSizes) -> io::Result<()> {
         assert!(buf.len() <= sizes.cbMaximumMessage as usize);
 
         unsafe {
@@ -903,7 +831,7 @@ impl<S> TlsStream<S>
                     self.out_buf.set_position(0);
                     Ok(())
                 }
-                err => Err(Error(err as winapi::DWORD)),
+                err => Err(io::Error::from_raw_os_error(err as i32)),
             }
         }
     }
@@ -919,7 +847,7 @@ impl<S> Write for TlsStream<S>
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let sizes = match try!(self.initialize()) {
             Some(sizes) => sizes,
-            None => return Err(Error(winapi::SEC_E_CONTEXT_EXPIRED as winapi::DWORD).into_io()),
+            None => return Err(io::Error::from_raw_os_error(winapi::SEC_E_CONTEXT_EXPIRED as i32)),
         };
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
@@ -929,7 +857,7 @@ impl<S> Write for TlsStream<S>
         // case of WouldBlock errors, we expect another call to write with the
         // same data.
         if self.out_buf.position() == self.out_buf.get_ref().len() as u64 {
-            try!(self.encrypt(&buf[..len], &sizes).map_err(Error::into_io));
+            try!(self.encrypt(&buf[..len], &sizes));
         }
         try!(self.write_out());
 
@@ -972,7 +900,7 @@ impl<S> BufRead for TlsStream<S>
                 self.needs_read = false;
             }
 
-            try!(self.decrypt().map_err(Error::into_io));
+            try!(self.decrypt());
         }
 
         Ok(self.get_buf())
@@ -1013,8 +941,8 @@ mod test {
         let creds = SchannelCredBuilder::new()
             .supported_algorithms(&[Algorithm::Rc2, Algorithm::Ecdsa])
             .acquire(Direction::Outbound);
-        assert_eq!(creds.err().unwrap().0,
-                   winapi::SEC_E_ALGORITHM_MISMATCH as winapi::DWORD);
+        assert_eq!(creds.err().unwrap().raw_os_error().unwrap(),
+                   winapi::SEC_E_ALGORITHM_MISMATCH as i32);
     }
 
     #[test]
@@ -1047,8 +975,7 @@ mod test {
             .initialize(creds, stream)
             .err()
             .unwrap();
-        let err = err.into_inner().unwrap().downcast::<Error>().unwrap();
-        assert_eq!(err.0, winapi::SEC_E_UNSUPPORTED_FUNCTION as winapi::DWORD);
+        assert_eq!(err.raw_os_error().unwrap(), winapi::SEC_E_UNSUPPORTED_FUNCTION as i32);
     }
 
     #[test]
@@ -1078,8 +1005,7 @@ mod test {
             .initialize(creds, stream)
             .err()
             .unwrap();
-        let err = err.into_inner().unwrap().downcast::<Error>().unwrap();
-        assert_eq!(err.0, winapi::CERT_E_CN_NO_MATCH as winapi::DWORD);
+        assert_eq!(err.raw_os_error().unwrap(), winapi::CERT_E_CN_NO_MATCH as i32);
     }
 
     #[test]
