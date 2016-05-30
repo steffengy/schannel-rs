@@ -261,7 +261,7 @@ impl SchannelCredBuilder {
             if let Some(ref enabled_protocols) = self.enabled_protocols {
                 cred_data.grbitEnabledProtocols = enabled_protocols.iter()
                                                                    .map(|p| p.dword(direction))
-                                                                   .fold(0, |acc, p| acc ^ p);
+                                                                   .fold(0, |acc, p| acc | p);
             }
 
             let direction = match direction {
