@@ -213,9 +213,9 @@ impl Protocol {
         } else {
             match self {
                 Protocol::Ssl3 => winapi::SP_PROT_SSL3_CLIENT,
-                Protocol::Tls10 => winapi::SP_PROT_TLS1_0_SERVER,
-                Protocol::Tls11 => winapi::SP_PROT_TLS1_1_SERVER,
-                Protocol::Tls12 => winapi::SP_PROT_TLS1_2_SERVER,
+                Protocol::Tls10 => winapi::SP_PROT_TLS1_0_CLIENT,
+                Protocol::Tls11 => winapi::SP_PROT_TLS1_1_CLIENT,
+                Protocol::Tls12 => winapi::SP_PROT_TLS1_2_CLIENT,
             }
         }
     }
@@ -1043,21 +1043,24 @@ mod test {
             .initialize(creds, stream);
         assert_eq!(format!("{:?}", stream.err().unwrap()),
                    "Error { repr: Custom(Custom { kind: Other, error: Error { code: 0x80090302, message: \"The function requested is not supported\" } }) }");
-
-        let creds = SchannelCredBuilder::new()
-            .enabled_protocols(&[Protocol::Tls12])
-            .acquire(Direction::Outbound);
-        assert_eq!(creds.err().unwrap().0, winapi::SEC_E_ALGORITHM_MISMATCH as winapi::DWORD);
     }
 
     #[test]
     fn valid_protocol() {
-        // How to make this pass...
         let creds = SchannelCredBuilder::new()
-            .enabled_protocols(&[Protocol::Tls10, Protocol::Tls11, Protocol::Tls12])
-            .supported_algorithms(&[Algorithm::RsaKeyx, Algorithm::Aes128, Algorithm::Sha1, Algorithm::Aes, Algorithm::Aes192, Algorithm::Aes256, Algorithm::Ecdh, Algorithm::RsaSign, Algorithm::Sha384, Algorithm::Sha512])
-            .acquire(Direction::Outbound);
-        assert_eq!(creds.err().unwrap().0, winapi::SEC_E_ALGORITHM_MISMATCH as winapi::DWORD);
+            .enabled_protocols(&[Protocol::Tls12])
+            .acquire(Direction::Outbound)
+            .unwrap();
+        let stream = TcpStream::connect("google.com:443").unwrap();
+        let mut stream = TlsStreamBuilder::new()
+            .domain("google.com")
+            .initialize(creds, stream)
+            .unwrap();
+        stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
+        let mut out = vec![];
+        stream.read_to_end(&mut out).unwrap();
+        assert!(out.starts_with(b"HTTP/1.0 200 OK"));
+        assert!(out.ends_with(b"</html>"));
     }
 
     #[test]
