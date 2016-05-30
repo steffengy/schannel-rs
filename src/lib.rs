@@ -1023,6 +1023,20 @@ mod test {
     }
 
     #[test]
+    fn self_signed_cert() {
+        let creds = SchannelCredBuilder::new()
+            .acquire(Direction::Outbound)
+            .unwrap();
+        let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
+        let err = TlsStreamBuilder::new()
+            .domain("self-signed.badssl.com")
+            .initialize(creds, stream)
+            .err()
+            .unwrap();
+        assert_eq!(err.raw_os_error().unwrap(), winapi::CERT_E_UNTRUSTEDROOT as i32);
+    }
+
+    #[test]
     fn shutdown() {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
