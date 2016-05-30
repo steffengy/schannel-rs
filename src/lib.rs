@@ -196,12 +196,10 @@ impl SchannelCredBuilder {
         SchannelCredBuilder { supported_algorithms: None }
     }
 
-    /// Specify the supported algorithms for connections made with credentials produced by this
-    /// builder. If no algorithms are specified (i.e. if this method isn't called or the `Vec` is
-    /// empty) then Schannel uses the system defaults.
-    pub fn with_supported_algorithms(mut self,
-                                     supported_algorithms: Vec<Algorithm>)
-                                     -> SchannelCredBuilder {
+    /// Sets the algorithms supported for sessions created from this builder.
+    pub fn supported_algorithms(mut self,
+                                supported_algorithms: Vec<Algorithm>)
+                                -> SchannelCredBuilder {
         self.supported_algorithms = Some(supported_algorithms);
         self
     }
@@ -964,7 +962,7 @@ mod test {
             Algorithm::Ecdsa,
         ];
         let creds = SchannelCredBuilder::new()
-            .with_supported_algorithms(algorithms)
+            .supported_algorithms(algorithms)
             .acquire(Direction::Outbound);
         assert_eq!(creds.err().unwrap().0,
                    winapi::SEC_E_ALGORITHM_MISMATCH as winapi::DWORD);
@@ -977,7 +975,7 @@ mod test {
             Algorithm::Ecdsa,
         ];
         let creds = SchannelCredBuilder::new()
-            .with_supported_algorithms(algorithms)
+            .supported_algorithms(algorithms)
             .acquire(Direction::Outbound)
             .unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
