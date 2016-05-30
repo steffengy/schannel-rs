@@ -285,7 +285,11 @@ impl TlsStreamBuilder {
             enc_in: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.to_owned()),
         };
-        try!(stream.initialize());
+        match stream.initialize() {
+            Ok(_) => {}
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) => return Err(e),
+        }
 
         Ok(stream)
     }
