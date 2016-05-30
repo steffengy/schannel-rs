@@ -1009,6 +1009,21 @@ mod test {
     }
 
     #[test]
+    fn expired_cert() {
+        let creds = SchannelCredBuilder::new()
+            .acquire(Direction::Outbound)
+            .unwrap();
+        let stream = TcpStream::connect("expired.badssl.com:443").unwrap();
+        let err = TlsStreamBuilder::new()
+            .domain("expired.badssl.com")
+            .initialize(creds, stream)
+            .err()
+            .unwrap();
+        let err = err.into_inner().unwrap().downcast::<Error>().unwrap();
+        assert_eq!(err.0, winapi::CERT_E_EXPIRED as winapi::DWORD);
+    }
+
+    #[test]
     fn shutdown() {
         let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
