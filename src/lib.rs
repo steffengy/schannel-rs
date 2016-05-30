@@ -4,13 +4,7 @@ extern crate libc;
 extern crate secur32;
 extern crate winapi;
 
-use crypt32::{CertFreeCertificateContext, CertFreeCertificateChain, CertGetCertificateChain,
-              CertVerifyCertificateChainPolicy};
-use kernel32::{FormatMessageW, LocalFree, GetLastError};
 use libc::c_ulong;
-use secur32::{AcquireCredentialsHandleA, FreeCredentialsHandle, InitializeSecurityContextW,
-              DeleteSecurityContext, FreeContextBuffer, QueryContextAttributesW, DecryptMessage,
-              EncryptMessage, ApplyControlToken};
 use std::cmp;
 use std::error;
 use std::fmt;
@@ -20,36 +14,18 @@ use std::ops::Deref;
 use std::ptr;
 use std::result;
 use std::slice;
-use winapi::{CredHandle, DWORD, SCHANNEL_CRED, SCHANNEL_CRED_VERSION,
-             UNISP_NAME, SECPKG_CRED_OUTBOUND, SECPKG_CRED_INBOUND, SEC_E_OK, CtxtHandle,
-             ISC_REQ_CONFIDENTIALITY, ISC_REQ_INTEGRITY, ISC_REQ_REPLAY_DETECT,
-             ISC_REQ_SEQUENCE_DETECT, ISC_REQ_ALLOCATE_MEMORY, ISC_REQ_STREAM, SecBuffer,
-             SECBUFFER_EMPTY, SECBUFFER_TOKEN, SecBufferDesc, SECBUFFER_VERSION,
-             SEC_I_CONTINUE_NEEDED, SecPkgContext_StreamSizes, SECPKG_ATTR_STREAM_SIZES,
-             SECBUFFER_ALERT, SECBUFFER_EXTRA, SEC_E_INCOMPLETE_MESSAGE, SECBUFFER_DATA,
-             SECBUFFER_STREAM_HEADER, SECBUFFER_STREAM_TRAILER, SEC_I_CONTEXT_EXPIRED,
-             SEC_I_RENEGOTIATE, SCHANNEL_SHUTDOWN, SEC_E_CONTEXT_EXPIRED,
-             ISC_REQ_MANUAL_CRED_VALIDATION, SECPKG_ATTR_REMOTE_CERT_CONTEXT, CERT_CONTEXT,
-             CERT_CHAIN_CONTEXT, CERT_CHAIN_PARA, FORMAT_MESSAGE_ALLOCATE_BUFFER,
-             FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS, TRUE,
-             CERT_CHAIN_CACHE_END_CERT, CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY,
-             USAGE_MATCH_TYPE_OR, szOID_PKIX_KP_SERVER_AUTH, szOID_SERVER_GATED_CRYPTO,
-             szOID_SGC_NETSCAPE, LPSTR, CERT_CHAIN_POLICY_SSL, CERT_CHAIN_POLICY_PARA,
-             CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS, SSL_EXTRA_CERT_CHAIN_POLICY_PARA,
-             AUTHTYPE_SERVER, CERT_CHAIN_POLICY_STATUS, FALSE, ERROR_SUCCESS, LPCSTR,
-             SCH_USE_STRONG_CRYPTO};
 
-const INIT_REQUESTS: c_ulong = ISC_REQ_CONFIDENTIALITY |
-                               ISC_REQ_INTEGRITY |
-                               ISC_REQ_REPLAY_DETECT |
-                               ISC_REQ_SEQUENCE_DETECT |
-                               ISC_REQ_MANUAL_CRED_VALIDATION |
-                               ISC_REQ_ALLOCATE_MEMORY |
-                               ISC_REQ_STREAM;
+const INIT_REQUESTS: c_ulong = winapi::ISC_REQ_CONFIDENTIALITY |
+                               winapi::ISC_REQ_INTEGRITY |
+                               winapi::ISC_REQ_REPLAY_DETECT |
+                               winapi::ISC_REQ_SEQUENCE_DETECT |
+                               winapi::ISC_REQ_MANUAL_CRED_VALIDATION |
+                               winapi::ISC_REQ_ALLOCATE_MEMORY |
+                               winapi::ISC_REQ_STREAM;
 
 pub type Result<T> = result::Result<T, Error>;
 
-pub struct Error(DWORD);
+pub struct Error(winapi::DWORD);
 
 impl fmt::Debug for Error {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
@@ -79,7 +55,7 @@ impl error::Error for Error {
 
 impl Error {
     fn last_error() -> Error {
-        let e = unsafe { GetLastError() };
+        let e = unsafe { kernel32::GetLastError() };
         Error(e)
     }
 
@@ -91,16 +67,16 @@ impl Error {
         unsafe {
             let mut buf: *mut u16 = ptr::null_mut();
 
-            let flags = FORMAT_MESSAGE_ALLOCATE_BUFFER |
-                FORMAT_MESSAGE_FROM_SYSTEM |
-                FORMAT_MESSAGE_IGNORE_INSERTS;
-            let ret = FormatMessageW(flags,
-                                     ptr::null_mut(),
-                                     self.0 as DWORD,
-                                     0,
-                                     &mut buf as *mut _ as *mut _,
-                                     0,
-                                     ptr::null_mut());
+            let flags = winapi::FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                winapi::FORMAT_MESSAGE_FROM_SYSTEM |
+                winapi::FORMAT_MESSAGE_IGNORE_INSERTS;
+            let ret = kernel32::FormatMessageW(flags,
+                                               ptr::null_mut(),
+                                               self.0 as winapi::DWORD,
+                                               0,
+                                               &mut buf as *mut _ as *mut _,
+                                               0,
+                                               ptr::null_mut());
 
             if ret == 0 {
                 return None;
@@ -109,26 +85,26 @@ impl Error {
             let slice = slice::from_raw_parts(buf, ret as usize);
             let s = String::from_utf16(slice);
 
-            LocalFree(buf as *mut _);
+            kernel32::LocalFree(buf as *mut _);
 
             s.ok()
         }
     }
 }
 
-struct CertContext(*mut CERT_CONTEXT);
+struct CertContext(*mut winapi::CERT_CONTEXT);
 
 impl Drop for CertContext {
     fn drop(&mut self) {
-        unsafe { CertFreeCertificateContext(self.0); }
+        unsafe { crypt32::CertFreeCertificateContext(self.0); }
     }
 }
 
-struct CertChainContext(*const CERT_CHAIN_CONTEXT);
+struct CertChainContext(*const winapi::CERT_CHAIN_CONTEXT);
 
 impl Drop for CertChainContext {
     fn drop(&mut self) {
-        unsafe { CertFreeCertificateChain(self.0); }
+        unsafe { crypt32::CertFreeCertificateChain(self.0); }
     }
 }
 
@@ -233,42 +209,42 @@ impl SchannelCredBuilder {
     pub fn acquire(&self, direction: Direction) -> Result<SchannelCred> {
         unsafe {
             let mut handle = mem::uninitialized();
-            let mut cred_data: SCHANNEL_CRED = mem::zeroed();
-            cred_data.dwVersion = SCHANNEL_CRED_VERSION;
-            cred_data.dwFlags = SCH_USE_STRONG_CRYPTO;
+            let mut cred_data: winapi::SCHANNEL_CRED = mem::zeroed();
+            cred_data.dwVersion = winapi::SCHANNEL_CRED_VERSION;
+            cred_data.dwFlags = winapi::SCH_USE_STRONG_CRYPTO;
             if let Some(ref supported_algorithms) = self.supported_algorithms {
-                cred_data.cSupportedAlgs = supported_algorithms.len() as DWORD;
+                cred_data.cSupportedAlgs = supported_algorithms.len() as winapi::DWORD;
                 cred_data.palgSupportedAlgs = supported_algorithms.as_ptr() as *mut _;
             }
 
             let direction = match direction {
-                Direction::Inbound => SECPKG_CRED_INBOUND,
-                Direction::Outbound => SECPKG_CRED_OUTBOUND,
+                Direction::Inbound => winapi::SECPKG_CRED_INBOUND,
+                Direction::Outbound => winapi::SECPKG_CRED_OUTBOUND,
             };
 
-            let mut unisp_name = UNISP_NAME.bytes().chain(Some(0u8)).collect::<Vec<u8>>();
-            match AcquireCredentialsHandleA(ptr::null_mut(),
-                                            unisp_name.as_mut_slice() as *mut _ as *mut _,
-                                            direction,
-                                            ptr::null_mut(),
-                                            &mut cred_data as *mut _ as *mut _,
-                                            None,
-                                            ptr::null_mut(),
-                                            &mut handle,
-                                            ptr::null_mut()) {
-                SEC_E_OK => Ok(SchannelCred(handle)),
-                err => Err(Error(err as DWORD)),
+            let mut unisp_name = winapi::UNISP_NAME.bytes().chain(Some(0u8)).collect::<Vec<u8>>();
+            match secur32::AcquireCredentialsHandleA(ptr::null_mut(),
+                                                     unisp_name.as_mut_slice() as *mut _ as *mut _,
+                                                     direction,
+                                                     ptr::null_mut(),
+                                                     &mut cred_data as *mut _ as *mut _,
+                                                     None,
+                                                     ptr::null_mut(),
+                                                     &mut handle,
+                                                     ptr::null_mut()) {
+                winapi::SEC_E_OK => Ok(SchannelCred(handle)),
+                err => Err(Error(err as winapi::DWORD)),
             }
         }
     }
 }
 
-pub struct SchannelCred(CredHandle);
+pub struct SchannelCred(winapi::CredHandle);
 
 impl Drop for SchannelCred {
     fn drop(&mut self) {
         unsafe {
-            FreeCredentialsHandle(&mut self.0);
+            secur32::FreeCredentialsHandle(&mut self.0);
         }
     }
 }
@@ -316,7 +292,7 @@ impl TlsStreamBuilder {
     }
 }
 
-struct SecurityContext(CtxtHandle);
+struct SecurityContext(winapi::CtxtHandle);
 
 impl SecurityContext {
     fn initialize(cred: &SchannelCred,
@@ -327,47 +303,47 @@ impl SecurityContext {
 
             let mut ctxt = mem::uninitialized();
 
-            let mut outbuf = SecBuffer {
+            let mut outbuf = winapi::SecBuffer {
                 cbBuffer: 0,
-                BufferType: SECBUFFER_EMPTY,
+                BufferType: winapi::SECBUFFER_EMPTY,
                 pvBuffer: ptr::null_mut(),
             };
-            let mut outbuf_desc = SecBufferDesc {
-                ulVersion: SECBUFFER_VERSION,
+            let mut outbuf_desc = winapi::SecBufferDesc {
+                ulVersion: winapi::SECBUFFER_VERSION,
                 cBuffers: 1,
                 pBuffers: &mut outbuf,
             };
 
             let mut attributes = 0;
 
-            match InitializeSecurityContextW(&cred.0 as *const _ as *mut _,
-                                             ptr::null_mut(),
-                                             domain,
-                                             INIT_REQUESTS,
-                                             0,
-                                             0,
-                                             ptr::null_mut(),
-                                             0,
-                                             &mut ctxt,
-                                             &mut outbuf_desc,
-                                             &mut attributes,
-                                             ptr::null_mut()) {
-                SEC_I_CONTINUE_NEEDED => Ok((SecurityContext(ctxt), ContextBuffer(outbuf))),
-                err => Err(Error(err as DWORD)),
+            match secur32::InitializeSecurityContextW(&cred.0 as *const _ as *mut _,
+                                                      ptr::null_mut(),
+                                                      domain,
+                                                      INIT_REQUESTS,
+                                                      0,
+                                                      0,
+                                                      ptr::null_mut(),
+                                                      0,
+                                                      &mut ctxt,
+                                                      &mut outbuf_desc,
+                                                      &mut attributes,
+                                                      ptr::null_mut()) {
+                winapi::SEC_I_CONTINUE_NEEDED => Ok((SecurityContext(ctxt), ContextBuffer(outbuf))),
+                err => Err(Error(err as winapi::DWORD)),
             }
         }
     }
 
-    fn stream_sizes(&mut self) -> Result<SecPkgContext_StreamSizes> {
+    fn stream_sizes(&mut self) -> Result<winapi::SecPkgContext_StreamSizes> {
         unsafe {
             let mut stream_sizes = mem::uninitialized();
-            let status = QueryContextAttributesW(&mut self.0,
-                                                 SECPKG_ATTR_STREAM_SIZES,
-                                                 &mut stream_sizes as *mut _ as *mut _);
-            if status == SEC_E_OK {
+            let status = secur32::QueryContextAttributesW(&mut self.0,
+                                                          winapi::SECPKG_ATTR_STREAM_SIZES,
+                                                          &mut stream_sizes as *mut _ as *mut _);
+            if status == winapi::SEC_E_OK {
                 Ok(stream_sizes)
             } else {
-                Err(Error(status as DWORD))
+                Err(Error(status as winapi::DWORD))
             }
         }
     }
@@ -375,13 +351,13 @@ impl SecurityContext {
     fn remote_cert(&mut self) -> Result<CertContext> {
         unsafe {
             let mut cert_context = mem::uninitialized();
-            let status = QueryContextAttributesW(&mut self.0,
-                                                 SECPKG_ATTR_REMOTE_CERT_CONTEXT,
-                                                 &mut cert_context as *mut _ as *mut _);
-            if status == SEC_E_OK {
+            let status = secur32::QueryContextAttributesW(&mut self.0,
+                                                          winapi::SECPKG_ATTR_REMOTE_CERT_CONTEXT,
+                                                          &mut cert_context as *mut _ as *mut _);
+            if status == winapi::SEC_E_OK {
                 Ok(CertContext(cert_context))
             } else {
-                Err(Error(status as DWORD))
+                Err(Error(status as winapi::DWORD))
             }
         }
     }
@@ -390,17 +366,17 @@ impl SecurityContext {
 impl Drop for SecurityContext {
     fn drop(&mut self) {
         unsafe {
-            DeleteSecurityContext(&mut self.0);
+            secur32::DeleteSecurityContext(&mut self.0);
         }
     }
 }
 
-struct ContextBuffer(SecBuffer);
+struct ContextBuffer(winapi::SecBuffer);
 
 impl Drop for ContextBuffer {
     fn drop(&mut self) {
         unsafe {
-            FreeContextBuffer(self.0.pvBuffer);
+            secur32::FreeContextBuffer(self.0.pvBuffer);
         }
     }
 }
@@ -420,7 +396,7 @@ enum State {
         shutting_down: bool,
     },
     Streaming {
-        sizes: SecPkgContext_StreamSizes,
+        sizes: winapi::SecPkgContext_StreamSizes,
     },
     Shutdown,
 }
@@ -457,20 +433,20 @@ impl<S> TlsStream<S>
             State::Initializing { shutting_down: true, .. } => {},
             _ => {
                 unsafe {
-                    let mut token = SCHANNEL_SHUTDOWN;
-                    let mut buf = SecBuffer {
+                    let mut token = winapi::SCHANNEL_SHUTDOWN;
+                    let mut buf = winapi::SecBuffer {
                         cbBuffer: mem::size_of_val(&token) as c_ulong,
-                        BufferType: SECBUFFER_TOKEN,
+                        BufferType: winapi::SECBUFFER_TOKEN,
                         pvBuffer: &mut token as *mut _ as *mut _,
                     };
-                    let mut desc = SecBufferDesc {
-                        ulVersion: SECBUFFER_VERSION,
+                    let mut desc = winapi::SecBufferDesc {
+                        ulVersion: winapi::SECBUFFER_VERSION,
                         cBuffers: 1,
                         pBuffers: &mut buf,
                     };
-                    match ApplyControlToken(&mut self.context.0, &mut desc) {
-                        SEC_E_OK => {},
-                        err => return Err(Error(err as DWORD).into_io()),
+                    match secur32::ApplyControlToken(&mut self.context.0, &mut desc) {
+                        winapi::SEC_E_OK => {},
+                        err => return Err(Error(err as winapi::DWORD).into_io()),
                     }
                 }
 
@@ -493,60 +469,60 @@ impl<S> TlsStream<S>
                              .map(|b| b.as_ptr() as *mut u16)
                              .unwrap_or(ptr::null_mut());
 
-            let inbufs = &mut [SecBuffer {
+            let inbufs = &mut [winapi::SecBuffer {
                                    cbBuffer: self.enc_in.position() as c_ulong,
-                                   BufferType: SECBUFFER_TOKEN,
+                                   BufferType: winapi::SECBUFFER_TOKEN,
                                    pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
                                },
-                               SecBuffer {
+                               winapi::SecBuffer {
                                    cbBuffer: 0,
-                                   BufferType: SECBUFFER_EMPTY,
+                                   BufferType: winapi::SECBUFFER_EMPTY,
                                    pvBuffer: ptr::null_mut(),
                                }];
-            let mut inbuf_desc = SecBufferDesc {
-                ulVersion: SECBUFFER_VERSION,
+            let mut inbuf_desc = winapi::SecBufferDesc {
+                ulVersion: winapi::SECBUFFER_VERSION,
                 cBuffers: 2,
                 pBuffers: inbufs.as_mut_ptr(),
             };
 
-            let outbufs = &mut [SecBuffer {
+            let outbufs = &mut [winapi::SecBuffer {
                                     cbBuffer: 0,
-                                    BufferType: SECBUFFER_TOKEN,
+                                    BufferType: winapi::SECBUFFER_TOKEN,
                                     pvBuffer: ptr::null_mut(),
                                 },
-                                SecBuffer {
+                                winapi::SecBuffer {
                                     cbBuffer: 0,
-                                    BufferType: SECBUFFER_ALERT,
+                                    BufferType: winapi::SECBUFFER_ALERT,
                                     pvBuffer: ptr::null_mut(),
                                 }];
-            let mut outbuf_desc = SecBufferDesc {
-                ulVersion: SECBUFFER_VERSION,
+            let mut outbuf_desc = winapi::SecBufferDesc {
+                ulVersion: winapi::SECBUFFER_VERSION,
                 cBuffers: 2,
                 pBuffers: outbufs.as_mut_ptr(),
             };
 
             let mut attributes = 0;
 
-            let status = InitializeSecurityContextW(&mut self.cred.0,
-                                                    &mut self.context.0,
-                                                    domain,
-                                                    INIT_REQUESTS,
-                                                    0,
-                                                    0,
-                                                    &mut inbuf_desc,
-                                                    0,
-                                                    ptr::null_mut(),
-                                                    &mut outbuf_desc,
-                                                    &mut attributes,
-                                                    ptr::null_mut());
+            let status = secur32::InitializeSecurityContextW(&mut self.cred.0,
+                                                             &mut self.context.0,
+                                                             domain,
+                                                             INIT_REQUESTS,
+                                                             0,
+                                                             0,
+                                                             &mut inbuf_desc,
+                                                             0,
+                                                             ptr::null_mut(),
+                                                             &mut outbuf_desc,
+                                                             &mut attributes,
+                                                             ptr::null_mut());
 
             if !outbufs[1].pvBuffer.is_null() {
-                FreeContextBuffer(outbufs[1].pvBuffer);
+                secur32::FreeContextBuffer(outbufs[1].pvBuffer);
             }
 
             match status {
-                SEC_I_CONTINUE_NEEDED => {
-                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA {
+                winapi::SEC_I_CONTINUE_NEEDED => {
+                    let nread = if inbufs[1].BufferType == winapi::SECBUFFER_EXTRA {
                         self.enc_in.position() as usize - inbufs[1].cbBuffer as usize
                     } else {
                         self.enc_in.position() as usize
@@ -557,9 +533,9 @@ impl<S> TlsStream<S>
                     self.needs_read = self.enc_in.position() == 0;
                     self.out_buf.get_mut().extend_from_slice(&to_write);
                 }
-                SEC_E_INCOMPLETE_MESSAGE => self.needs_read = true,
-                SEC_E_OK => {
-                    let nread = if inbufs[1].BufferType == SECBUFFER_EXTRA {
+                winapi::SEC_E_INCOMPLETE_MESSAGE => self.needs_read = true,
+                winapi::SEC_E_OK => {
+                    let nread = if inbufs[1].BufferType == winapi::SECBUFFER_EXTRA {
                         self.enc_in.position() as usize - inbufs[1].cbBuffer as usize
                     } else {
                         self.enc_in.position() as usize
@@ -582,13 +558,13 @@ impl<S> TlsStream<S>
                         *more_calls = false;
                     }
                 }
-                _ => return Err(Error(status as DWORD)),
+                _ => return Err(Error(status as winapi::DWORD)),
             }
             Ok(())
         }
     }
 
-    fn initialize(&mut self) -> io::Result<Option<SecPkgContext_StreamSizes>> {
+    fn initialize(&mut self) -> io::Result<Option<winapi::SecPkgContext_StreamSizes>> {
         loop {
             match self.state {
                 State::Initializing { mut needs_flush, more_calls, shutting_down } => {
@@ -640,37 +616,37 @@ impl<S> TlsStream<S>
         let cert_context = try!(self.context.remote_cert());
 
         let cert_chain = unsafe {
-            let flags = CERT_CHAIN_CACHE_END_CERT |
-                CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY;
+            let flags = winapi::CERT_CHAIN_CACHE_END_CERT |
+                winapi::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY;
 
-            let mut para: CERT_CHAIN_PARA = mem::zeroed();
-            para.cbSize = mem::size_of_val(&para) as DWORD;
-            para.RequestedUsage.dwType = USAGE_MATCH_TYPE_OR;
+            let mut para: winapi::CERT_CHAIN_PARA = mem::zeroed();
+            para.cbSize = mem::size_of_val(&para) as winapi::DWORD;
+            para.RequestedUsage.dwType = winapi::USAGE_MATCH_TYPE_OR;
 
-            let mut pkix_kp_server_auth = szOID_PKIX_KP_SERVER_AUTH.as_bytes().to_owned();
+            let mut pkix_kp_server_auth = winapi::szOID_PKIX_KP_SERVER_AUTH.as_bytes().to_owned();
             pkix_kp_server_auth.push(0);
-            let mut server_gated_crypto = szOID_SERVER_GATED_CRYPTO.as_bytes().to_owned();
+            let mut server_gated_crypto = winapi::szOID_SERVER_GATED_CRYPTO.as_bytes().to_owned();
             server_gated_crypto.push(0);
-            let mut sgc_netscape = szOID_SGC_NETSCAPE.as_bytes().to_owned();
+            let mut sgc_netscape = winapi::szOID_SGC_NETSCAPE.as_bytes().to_owned();
             sgc_netscape.push(0);
-            let mut identifiers = [pkix_kp_server_auth.as_ptr() as LPSTR,
-                               server_gated_crypto.as_ptr() as LPSTR,
-                               sgc_netscape.as_ptr() as LPSTR];
-            para.RequestedUsage.Usage.cUsageIdentifier = identifiers.len() as DWORD;
+            let mut identifiers = [pkix_kp_server_auth.as_ptr() as winapi::LPSTR,
+                               server_gated_crypto.as_ptr() as winapi::LPSTR,
+                               sgc_netscape.as_ptr() as winapi::LPSTR];
+            para.RequestedUsage.Usage.cUsageIdentifier = identifiers.len() as winapi::DWORD;
             para.RequestedUsage.Usage.rgpszUsageIdentifier = identifiers.as_mut_ptr();
 
             let mut cert_chain = mem::uninitialized();
 
-            let res = CertGetCertificateChain(ptr::null_mut(),
-                                              cert_context.0,
-                                              ptr::null_mut(),
-                                              ptr::null_mut(),
-                                              &mut para,
-                                              flags,
-                                              ptr::null_mut(),
-                                              &mut cert_chain);
+            let res = crypt32::CertGetCertificateChain(ptr::null_mut(),
+                                                       cert_context.0,
+                                                       ptr::null_mut(),
+                                                       ptr::null_mut(),
+                                                       &mut para,
+                                                       flags,
+                                                       ptr::null_mut(),
+                                                       &mut cert_chain);
 
-            if res == TRUE {
+            if res == winapi::TRUE {
                 CertChainContext(cert_chain)
             } else {
                 return Err(Error::last_error());
@@ -678,30 +654,30 @@ impl<S> TlsStream<S>
         };
 
         unsafe {
-            let mut extra_para: SSL_EXTRA_CERT_CHAIN_POLICY_PARA = mem::zeroed();
-            extra_para.cbSize = mem::size_of_val(&extra_para) as DWORD;
-            extra_para.dwAuthType = AUTHTYPE_SERVER;
+            let mut extra_para: winapi::SSL_EXTRA_CERT_CHAIN_POLICY_PARA = mem::zeroed();
+            extra_para.cbSize = mem::size_of_val(&extra_para) as winapi::DWORD;
+            extra_para.dwAuthType = winapi::AUTHTYPE_SERVER;
             if let Some(ref mut name) = self.domain {
                 extra_para.pwszServerName = name.as_mut_ptr();
             }
 
-            let mut para: CERT_CHAIN_POLICY_PARA = mem::zeroed();
-            para.cbSize = mem::size_of_val(&para) as DWORD;
-            para.dwFlags = CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS;
+            let mut para: winapi::CERT_CHAIN_POLICY_PARA = mem::zeroed();
+            para.cbSize = mem::size_of_val(&para) as winapi::DWORD;
+            para.dwFlags = winapi::CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS;
             para.pvExtraPolicyPara = &mut extra_para as *mut _ as *mut _;
 
-            let mut status: CERT_CHAIN_POLICY_STATUS = mem::zeroed();
-            status.cbSize = mem::size_of_val(&status) as DWORD;
+            let mut status: winapi::CERT_CHAIN_POLICY_STATUS = mem::zeroed();
+            status.cbSize = mem::size_of_val(&status) as winapi::DWORD;
 
-            let res = CertVerifyCertificateChainPolicy(CERT_CHAIN_POLICY_SSL as LPCSTR,
-                                                       cert_chain.0,
-                                                       &mut para,
-                                                       &mut status);
-            if res == FALSE {
+            let res = crypt32::CertVerifyCertificateChainPolicy(winapi::CERT_CHAIN_POLICY_SSL as winapi::LPCSTR,
+                                                                cert_chain.0,
+                                                                &mut para,
+                                                                &mut status);
+            if res == winapi::FALSE {
                 return Err(Error::last_error());
             }
 
-            if status.dwError != ERROR_SUCCESS {
+            if status.dwError != winapi::ERROR_SUCCESS {
                 return Err(Error(status.dwError));
             }
         }
@@ -752,34 +728,34 @@ impl<S> TlsStream<S>
 
     fn decrypt(&mut self) -> Result<()> {
         unsafe {
-            let bufs = &mut [SecBuffer {
+            let bufs = &mut [winapi::SecBuffer {
                                  cbBuffer: self.enc_in.position() as c_ulong,
-                                 BufferType: SECBUFFER_DATA,
+                                 BufferType: winapi::SECBUFFER_DATA,
                                  pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
                              },
-                             SecBuffer {
+                             winapi::SecBuffer {
                                  cbBuffer: 0,
-                                 BufferType: SECBUFFER_EMPTY,
+                                 BufferType: winapi::SECBUFFER_EMPTY,
                                  pvBuffer: ptr::null_mut(),
                              },
-                             SecBuffer {
+                             winapi::SecBuffer {
                                  cbBuffer: 0,
-                                 BufferType: SECBUFFER_EMPTY,
+                                 BufferType: winapi::SECBUFFER_EMPTY,
                                  pvBuffer: ptr::null_mut(),
                              },
-                             SecBuffer {
+                             winapi::SecBuffer {
                                  cbBuffer: 0,
-                                 BufferType: SECBUFFER_EMPTY,
+                                 BufferType: winapi::SECBUFFER_EMPTY,
                                  pvBuffer: ptr::null_mut(),
                              }];
-            let mut bufdesc = SecBufferDesc {
-                ulVersion: SECBUFFER_VERSION,
+            let mut bufdesc = winapi::SecBufferDesc {
+                ulVersion: winapi::SECBUFFER_VERSION,
                 cBuffers: 4,
                 pBuffers: bufs.as_mut_ptr(),
             };
 
-            match DecryptMessage(&mut self.context.0, &mut bufdesc, 0, ptr::null_mut()) {
-                SEC_E_OK => {
+            match secur32::DecryptMessage(&mut self.context.0, &mut bufdesc, 0, ptr::null_mut()) {
+                winapi::SEC_E_OK => {
                     let start = bufs[1].pvBuffer as usize - self.enc_in.get_ref().as_ptr() as usize;
                     let end = start + bufs[1].cbBuffer as usize;
                     self.dec_in.get_mut().clear();
@@ -788,7 +764,7 @@ impl<S> TlsStream<S>
                         .extend_from_slice(&self.enc_in.get_ref()[start..end]);
                     self.dec_in.set_position(0);
 
-                    let nread = if bufs[3].BufferType == SECBUFFER_EXTRA {
+                    let nread = if bufs[3].BufferType == winapi::SECBUFFER_EXTRA {
                         self.enc_in.position() as usize - bufs[3].cbBuffer as usize
                     } else {
                         self.enc_in.position() as usize
@@ -797,19 +773,19 @@ impl<S> TlsStream<S>
                     self.needs_read = self.enc_in.position() == 0;
                     Ok(())
                 }
-                SEC_E_INCOMPLETE_MESSAGE => {
+                winapi::SEC_E_INCOMPLETE_MESSAGE => {
                     self.needs_read = true;
                     Ok(())
                 }
-                state @ SEC_I_CONTEXT_EXPIRED |
-                state @ SEC_I_RENEGOTIATE => {
+                state @ winapi::SEC_I_CONTEXT_EXPIRED |
+                state @ winapi::SEC_I_RENEGOTIATE => {
                     self.state = State::Initializing {
                         needs_flush: false,
                         more_calls: true,
-                        shutting_down: state == SEC_I_CONTEXT_EXPIRED,
+                        shutting_down: state == winapi::SEC_I_CONTEXT_EXPIRED,
                     };
 
-                    let nread = if bufs[3].BufferType == SECBUFFER_EXTRA {
+                    let nread = if bufs[3].BufferType == winapi::SECBUFFER_EXTRA {
                         self.enc_in.position() as usize - bufs[3].cbBuffer as usize
                     } else {
                         self.enc_in.position() as usize
@@ -818,12 +794,12 @@ impl<S> TlsStream<S>
                     self.needs_read = self.enc_in.position() == 0;
                     Ok(())
                 }
-                e => Err(Error(e as DWORD)),
+                e => Err(Error(e as winapi::DWORD)),
             }
         }
     }
 
-    fn encrypt(&mut self, buf: &[u8], sizes: &SecPkgContext_StreamSizes) -> Result<()> {
+    fn encrypt(&mut self, buf: &[u8], sizes: &winapi::SecPkgContext_StreamSizes) -> Result<()> {
         assert!(buf.len() <= sizes.cbMaximumMessage as usize);
 
         unsafe {
@@ -839,40 +815,40 @@ impl<S> TlsStream<S>
                 .clone_from_slice(buf);
 
             let buf_start = self.out_buf.get_mut().as_mut_ptr();
-            let bufs = &mut [SecBuffer {
+            let bufs = &mut [winapi::SecBuffer {
                                  cbBuffer: sizes.cbHeader,
-                                 BufferType: SECBUFFER_STREAM_HEADER,
+                                 BufferType: winapi::SECBUFFER_STREAM_HEADER,
                                  pvBuffer: buf_start as *mut _,
                              },
-                             SecBuffer {
+                             winapi::SecBuffer {
                                  cbBuffer: buf.len() as c_ulong,
-                                 BufferType: SECBUFFER_DATA,
+                                 BufferType: winapi::SECBUFFER_DATA,
                                  pvBuffer: buf_start.offset(sizes.cbHeader as isize) as *mut _,
                              },
-                             SecBuffer {
+                             winapi::SecBuffer {
                                  cbBuffer: sizes.cbTrailer,
-                                 BufferType: SECBUFFER_STREAM_TRAILER,
+                                 BufferType: winapi::SECBUFFER_STREAM_TRAILER,
                                  pvBuffer: buf_start.offset(sizes.cbHeader as isize + buf.len() as isize) as *mut _,
                              },
-                             SecBuffer {
+                             winapi::SecBuffer {
                                  cbBuffer: 0,
-                                 BufferType: SECBUFFER_EMPTY,
+                                 BufferType: winapi::SECBUFFER_EMPTY,
                                  pvBuffer: ptr::null_mut(),
                              }];
-            let mut bufdesc = SecBufferDesc {
-                ulVersion: SECBUFFER_VERSION,
+            let mut bufdesc = winapi::SecBufferDesc {
+                ulVersion: winapi::SECBUFFER_VERSION,
                 cBuffers: 4,
                 pBuffers: bufs.as_mut_ptr(),
             };
 
-            match EncryptMessage(&mut self.context.0, 0, &mut bufdesc, 0) {
-                SEC_E_OK => {
+            match secur32::EncryptMessage(&mut self.context.0, 0, &mut bufdesc, 0) {
+                winapi::SEC_E_OK => {
                     let len = bufs[0].cbBuffer + bufs[1].cbBuffer + bufs[2].cbBuffer;
                     self.out_buf.get_mut().truncate(len as usize);
                     self.out_buf.set_position(0);
                     Ok(())
                 }
-                err => Err(Error(err as DWORD)),
+                err => Err(Error(err as winapi::DWORD)),
             }
         }
     }
@@ -888,7 +864,7 @@ impl<S> Write for TlsStream<S>
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let sizes = match try!(self.initialize()) {
             Some(sizes) => sizes,
-            None => return Err(Error(SEC_E_CONTEXT_EXPIRED as DWORD).into_io()),
+            None => return Err(Error(winapi::SEC_E_CONTEXT_EXPIRED as winapi::DWORD).into_io()),
         };
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
