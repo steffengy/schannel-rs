@@ -3,7 +3,10 @@ use std::io;
 use std::ptr;
 use winapi;
 
-use AsInner;
+use cert_context::CertContext;
+use ctl_context::CtlContext;
+
+use Inner;
 
 pub struct CertStore(winapi::HCERTSTORE);
 
@@ -23,7 +26,11 @@ impl Clone for CertStore {
 	}
 }
 
-impl AsInner<winapi::HCERTSTORE> for CertStore {
+impl Inner<winapi::HCERTSTORE> for CertStore {
+	unsafe fn from_inner(t: winapi::HCERTSTORE) -> CertStore {
+		CertStore(t)
+	}
+
 	fn as_inner(&self) -> winapi::HCERTSTORE {
 		self.0
 	}
@@ -61,7 +68,7 @@ impl Memory {
 				winapi::CERT_STORE_ADD_ALWAYS,
 				&mut cert_context);
 			if res == winapi::TRUE {
-				Ok(CertContext(cert_context))
+				Ok(CertContext::from_inner(cert_context))
 			} else {
 				Err(io::Error::last_os_error())
 			}
@@ -80,7 +87,7 @@ impl Memory {
 				winapi::CERT_STORE_ADD_ALWAYS,
 				&mut ctl_context);
 			if res == winapi::TRUE {
-				Ok(CtlContext(ctl_context))
+				Ok(CtlContext::from_inner(ctl_context))
 			} else {
 				Err(io::Error::last_os_error())
 			}
@@ -89,26 +96,6 @@ impl Memory {
 
 	pub fn into_store(self) -> CertStore {
 		self.0
-	}
-}
-
-pub struct CertContext(winapi::PCCERT_CONTEXT);
-
-impl Drop for CertContext {
-	fn drop(&mut self) {
-		unsafe {
-			crypt32::CertFreeCertificateContext(self.0);
-		}
-	}
-}
-
-pub struct CtlContext(winapi::PCCTL_CONTEXT);
-
-impl Drop for CtlContext {
-	fn drop(&mut self) {
-		unsafe {
-			crypt32::CertFreeCTLContext(self.0);
-		}
 	}
 }
 

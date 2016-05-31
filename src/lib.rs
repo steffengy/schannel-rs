@@ -12,9 +12,11 @@ use std::ops::Deref;
 use std::ptr;
 use std::slice;
 
-use cert::CertStore;
+use cert_store::CertStore;
 
-pub mod cert;
+pub mod cert_context;
+pub mod cert_store;
+pub mod ctl_context;
 
 const INIT_REQUESTS: c_ulong =
     winapi::ISC_REQ_CONFIDENTIALITY | winapi::ISC_REQ_INTEGRITY | winapi::ISC_REQ_REPLAY_DETECT |
@@ -930,7 +932,9 @@ impl<S> BufRead for TlsStream<S>
     }
 }
 
-trait AsInner<T> {
+trait Inner<T> {
+    unsafe fn from_inner(t: T) -> Self;
+
     fn as_inner(&self) -> T;
 }
 
