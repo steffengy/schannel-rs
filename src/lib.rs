@@ -12,6 +12,8 @@ use std::ops::Deref;
 use std::ptr;
 use std::slice;
 
+use cert::CertStore;
+
 pub mod cert;
 
 const INIT_REQUESTS: c_ulong =
@@ -229,6 +231,7 @@ impl Drop for SchannelCred {
 #[derive(Default)]
 pub struct TlsStreamBuilder {
     domain: Option<Vec<u16>>,
+    cert_store: Option<CertStore>,
 }
 
 impl TlsStreamBuilder {
@@ -241,6 +244,11 @@ impl TlsStreamBuilder {
         self
     }
 
+    pub fn cert_store(&mut self, cert_store: CertStore) -> &mut TlsStreamBuilder {
+        self.cert_store = Some(cert_store);
+        self
+    }
+
     pub fn initialize<S>(&self, cred: SchannelCred, stream: S) -> io::Result<TlsStream<S>>
         where S: Read + Write
     {
@@ -250,6 +258,7 @@ impl TlsStreamBuilder {
         let mut stream = TlsStream {
             cred: cred,
             context: ctxt,
+            cert_store: self.cert_store.clone(),
             domain: self.domain.clone(),
             stream: stream,
             state: State::Initializing {
@@ -385,6 +394,7 @@ enum State {
 pub struct TlsStream<S> {
     cred: SchannelCred,
     context: SecurityContext,
+    cert_store: Option<CertStore>,
     domain: Option<Vec<u16>>,
     stream: S,
     state: State,
@@ -597,6 +607,11 @@ impl<S> TlsStream<S>
         let cert_context = try!(self.context.remote_cert());
 
         let cert_chain = unsafe {
+            let cert_store = self.cert_store
+                                 .as_ref()
+                                 .map(|s| s.as_inner())
+                                 .unwrap_or(ptr::null_mut());
+
             let flags = winapi::CERT_CHAIN_CACHE_END_CERT |
                         winapi::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY |
                         winapi::CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
@@ -622,7 +637,7 @@ impl<S> TlsStream<S>
             let res = crypt32::CertGetCertificateChain(ptr::null_mut(),
                                                        cert_context.0,
                                                        ptr::null_mut(),
-                                                       ptr::null_mut(),
+                                                       cert_store,
                                                        &mut para,
                                                        flags,
                                                        ptr::null_mut(),
@@ -915,13 +930,17 @@ impl<S> BufRead for TlsStream<S>
     }
 }
 
+trait AsInner<T> {
+    fn as_inner(&self) -> T;
+}
+
 #[cfg(test)]
 mod test {
     use std::io::{Read, Write};
     use std::net::TcpStream;
+    use winapi;
 
     use super::*;
-    use winapi;
 
     #[test]
     fn basic() {

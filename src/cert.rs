@@ -3,6 +3,8 @@ use std::io;
 use std::ptr;
 use winapi;
 
+use AsInner;
+
 pub struct CertStore(winapi::HCERTSTORE);
 
 impl Drop for CertStore {
@@ -10,6 +12,20 @@ impl Drop for CertStore {
 		unsafe {
 			crypt32::CertCloseStore(self.0, 0);
 		}
+	}
+}
+
+impl Clone for CertStore {
+	fn clone(&self) -> CertStore {
+		unsafe {
+			CertStore(crypt32::CertDuplicateStore(self.0))
+		}
+	}
+}
+
+impl AsInner<winapi::HCERTSTORE> for CertStore {
+	fn as_inner(&self) -> winapi::HCERTSTORE {
+		self.0
 	}
 }
 
@@ -33,7 +49,7 @@ impl CertStore {
 pub struct Memory(CertStore);
 
 impl Memory {
-	pub fn add_certificate(&mut self, cert: &[u8]) -> io::Result<CertContext> {
+	pub fn add_der_certificate(&mut self, cert: &[u8]) -> io::Result<CertContext> {
 		unsafe {
 			let mut cert_context = ptr::null();
 
@@ -51,6 +67,29 @@ impl Memory {
 			}
 		}
 	}
+
+	pub fn add_der_ctl(&mut self, ctl: &[u8]) -> io::Result<CtlContext> {
+		unsafe {
+			let mut ctl_context = ptr::null();
+
+			let res = crypt32::CertAddEncodedCTLToStore(
+				(self.0).0,
+				winapi::X509_ASN_ENCODING | winapi::PKCS_7_ASN_ENCODING,
+				ctl.as_ptr() as *const _,
+				ctl.len() as winapi::DWORD,
+				winapi::CERT_STORE_ADD_ALWAYS,
+				&mut ctl_context);
+			if res == winapi::TRUE {
+				Ok(CtlContext(ctl_context))
+			} else {
+				Err(io::Error::last_os_error())
+			}
+		}
+	}
+
+	pub fn into_store(self) -> CertStore {
+		self.0
+	}
 }
 
 pub struct CertContext(winapi::PCCERT_CONTEXT);
@@ -59,6 +98,16 @@ impl Drop for CertContext {
 	fn drop(&mut self) {
 		unsafe {
 			crypt32::CertFreeCertificateContext(self.0);
+		}
+	}
+}
+
+pub struct CtlContext(winapi::PCCTL_CONTEXT);
+
+impl Drop for CtlContext {
+	fn drop(&mut self) {
+		unsafe {
+			crypt32::CertFreeCTLContext(self.0);
 		}
 	}
 }
@@ -78,6 +127,6 @@ mod test {
 		file.read_to_end(&mut cert).unwrap();
 
 		let mut store = CertStore::memory().unwrap();
-		store.add_certificate(&cert).unwrap();
+		store.add_der_certificate(&cert).unwrap();
 	}
 }
