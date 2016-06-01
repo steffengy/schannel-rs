@@ -30,20 +30,20 @@ impl Inner<winapi::PCCTL_CONTEXT> for CtlContext {
 impl CtlContext {
 	pub fn builder() -> Builder {
 		Builder {
-			entries: vec![],
+			certificates: vec![],
 			usages: vec![],
 		}
 	}
 }
 
 pub struct Builder {
-	entries: Vec<CtlEntry>,
+	certificates: Vec<CertContext>,
 	usages: Vec<Vec<u8>>,
 }
 
 impl Builder {
-	pub fn entry(&mut self, entry: CtlEntry) -> &mut Builder {
-		self.entries.push(entry);
+	pub fn certificate(&mut self, cert: CertContext) -> &mut Builder {
+		self.certificates.push(cert);
 		self
 	}
 
@@ -59,9 +59,13 @@ impl Builder {
 			let encoding = winapi::X509_ASN_ENCODING | winapi::PKCS_7_ASN_ENCODING;
 
 			let mut usages = self.usages.iter().map(|u| u.as_ptr()).collect::<Vec<_>>();
-			let mut entries = self.entries.iter()
-							      .map(|e| *(e.0.as_ptr() as *const winapi::CTL_ENTRY))
-							      .collect::<Vec<_>>();
+			let mut entry_data = vec![];
+			let mut entries = vec![];
+			for certificate in &self.certificates {
+				let data = try!(cert_entry(certificate));
+				entries.push(*(data.as_ptr() as *const winapi::CTL_ENTRY));
+				entry_data.push(data);
+			}
 
 			let mut ctl_info: winapi::CTL_INFO = mem::zeroed();
 			ctl_info.dwVersion = winapi::CTL_V1;
@@ -75,6 +79,17 @@ impl Builder {
 
 			let mut sign_info: winapi::CMSG_SIGNED_ENCODE_INFO = mem::zeroed();
 			sign_info.cbSize = mem::size_of_val(&sign_info) as winapi::DWORD;
+			let mut encoded_certs = self.certificates
+										.iter()
+										.map(|c| {
+											winapi::CERT_BLOB {
+												cbData: (*c.as_inner()).cbCertEncoded,
+												pbData: (*c.as_inner()).pbCertEncoded,
+											}
+										})
+										.collect::<Vec<_>>();
+			sign_info.rgCertEncoded = encoded_certs.as_mut_ptr();
+			sign_info.cCertEncoded = encoded_certs.len() as winapi::DWORD;
 
 			let flags = winapi::CMSG_ENCODE_SORTED_CTL_FLAG |
 				winapi::CMSG_ENCODE_HASHED_SUBJECT_IDENTIFIER_FLAG;
@@ -110,39 +125,35 @@ impl Builder {
 	}
 }
 
-pub struct CtlEntry(Vec<u8>);
+fn cert_entry(cert: &CertContext) -> io::Result<Vec<u8>> {
+	unsafe {
+		let mut size = 0;
 
-impl CtlEntry {
-	pub fn from_certificate(cert: &mut CertContext) -> io::Result<CtlEntry> {
-		unsafe {
-			let mut size = 0;
+		let res = crypt32::CertCreateCTLEntryFromCertificateContextProperties(
+			cert.as_inner(),
+			0,
+			ptr::null_mut(),
+			winapi::CTL_ENTRY_FROM_PROP_CHAIN_FLAG,
+			ptr::null_mut(),
+			ptr::null_mut(),
+			&mut size);
+		if res == winapi::FALSE {
+			return Err(io::Error::last_os_error());
+		}
 
-			let res = crypt32::CertCreateCTLEntryFromCertificateContextProperties(
-				cert.as_inner(),
-				0,
-				ptr::null_mut(),
-				winapi::CTL_ENTRY_FROM_PROP_CHAIN_FLAG,
-				ptr::null_mut(),
-				ptr::null_mut(),
-				&mut size);
-			if res == winapi::FALSE {
-				return Err(io::Error::last_os_error());
-			}
-
-			let mut entry = vec![0; size as usize];
-			let res = crypt32::CertCreateCTLEntryFromCertificateContextProperties(
-				cert.as_inner(),
-				0,
-				ptr::null_mut(),
-				winapi::CTL_ENTRY_FROM_PROP_CHAIN_FLAG,
-				ptr::null_mut(),
-				entry.as_mut_ptr() as winapi::PCTL_ENTRY,
-				&mut size);
-			if res == winapi::FALSE {
-				Err(io::Error::last_os_error())
-			} else {
-				Ok(CtlEntry(entry))
-			}
+		let mut entry = vec![0; size as usize];
+		let res = crypt32::CertCreateCTLEntryFromCertificateContextProperties(
+			cert.as_inner(),
+			0,
+			ptr::null_mut(),
+			winapi::CTL_ENTRY_FROM_PROP_CHAIN_FLAG,
+			ptr::null_mut(),
+			entry.as_mut_ptr() as winapi::PCTL_ENTRY,
+			&mut size);
+		if res == winapi::FALSE {
+			Err(io::Error::last_os_error())
+		} else {
+			Ok(entry)
 		}
 	}
 }
@@ -152,7 +163,7 @@ mod test {
 	use std::io::Read;
 	use std::fs::File;
 	use cert_store::CertStore;
-	use ctl_context::{CtlContext, CtlEntry};
+	use ctl_context::CtlContext;
 
 	#[test]
 	fn create_ctl() {
@@ -163,11 +174,10 @@ mod test {
         file.read_to_end(&mut cert).unwrap();
 
         let mut store = CertStore::memory().unwrap();
-        let mut cert = store.add_der_certificate(&cert).unwrap();
+        let cert = store.add_der_certificate(&cert).unwrap();
 
-        let entry = CtlEntry::from_certificate(&mut cert).unwrap();
         CtlContext::builder()
-            .entry(entry)
+        	.certificate(cert)
             .usage("1.3.6.1.4.1.311.2.2.2")
             .build()
             .unwrap();
