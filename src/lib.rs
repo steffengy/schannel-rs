@@ -161,13 +161,6 @@ pub struct SchannelCredBuilder {
 }
 
 impl SchannelCredBuilder {
-    pub fn new() -> SchannelCredBuilder {
-        SchannelCredBuilder {
-            supported_algorithms: None,
-            enabled_protocols: None,
-        }
-    }
-
     /// Sets the algorithms supported for sessions created from this builder.
     pub fn supported_algorithms(mut self,
                                 supported_algorithms: &[Algorithm])
@@ -226,6 +219,15 @@ impl Drop for SchannelCred {
     fn drop(&mut self) {
         unsafe {
             secur32::FreeCredentialsHandle(&mut self.0);
+        }
+    }
+}
+
+impl SchannelCred {
+    pub fn builder() -> SchannelCredBuilder {
+        SchannelCredBuilder {
+            supported_algorithms: None,
+            enabled_protocols: None,
         }
     }
 }
@@ -948,7 +950,7 @@ mod test {
 
     #[test]
     fn basic() {
-        let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
+        let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let mut stream = TlsStreamBuilder::new()
             .domain("google.com")
@@ -963,7 +965,7 @@ mod test {
 
     #[test]
     fn invalid_algorithms() {
-        let creds = SchannelCredBuilder::new()
+        let creds = SchannelCred::builder()
             .supported_algorithms(&[Algorithm::Rc2, Algorithm::Ecdsa])
             .acquire(Direction::Outbound);
         assert_eq!(creds.err().unwrap().raw_os_error().unwrap(),
@@ -972,7 +974,7 @@ mod test {
 
     #[test]
     fn valid_algorithms() {
-        let creds = SchannelCredBuilder::new()
+        let creds = SchannelCred::builder()
             .supported_algorithms(&[Algorithm::Aes128, Algorithm::Ecdsa])
             .acquire(Direction::Outbound)
             .unwrap();
@@ -991,7 +993,7 @@ mod test {
     #[test]
     #[ignore] // google's inconsistent about disallowing sslv3
     fn invalid_protocol() {
-        let creds = SchannelCredBuilder::new()
+        let creds = SchannelCred::builder()
             .enabled_protocols(&[Protocol::Ssl3])
             .acquire(Direction::Outbound)
             .unwrap();
@@ -1006,7 +1008,7 @@ mod test {
 
     #[test]
     fn valid_protocol() {
-        let creds = SchannelCredBuilder::new()
+        let creds = SchannelCred::builder()
             .enabled_protocols(&[Protocol::Tls12])
             .acquire(Direction::Outbound)
             .unwrap();
@@ -1024,7 +1026,7 @@ mod test {
 
     #[test]
     fn expired_cert() {
-        let creds = SchannelCredBuilder::new()
+        let creds = SchannelCred::builder()
             .acquire(Direction::Outbound)
             .unwrap();
         let stream = TcpStream::connect("expired.badssl.com:443").unwrap();
@@ -1038,7 +1040,7 @@ mod test {
 
     #[test]
     fn self_signed_cert() {
-        let creds = SchannelCredBuilder::new()
+        let creds = SchannelCred::builder()
             .acquire(Direction::Outbound)
             .unwrap();
         let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
@@ -1052,7 +1054,7 @@ mod test {
 
     #[test]
     fn wrong_host_cert() {
-        let creds = SchannelCredBuilder::new()
+        let creds = SchannelCred::builder()
             .acquire(Direction::Outbound)
             .unwrap();
         let stream = TcpStream::connect("wrong.host.badssl.com:443").unwrap();
@@ -1066,7 +1068,7 @@ mod test {
 
     #[test]
     fn shutdown() {
-        let creds = SchannelCredBuilder::new().acquire(Direction::Outbound).unwrap();
+        let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let mut stream = TlsStreamBuilder::new()
             .domain("google.com")
