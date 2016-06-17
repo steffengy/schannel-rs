@@ -9,6 +9,9 @@ use Inner;
 
 pub struct CtlContext(winapi::PCCTL_CONTEXT);
 
+unsafe impl Send for CtlContext {}
+unsafe impl Sync for CtlContext {}
+
 impl Drop for CtlContext {
 	fn drop(&mut self) {
 		unsafe {

@@ -5,6 +5,9 @@ use Inner;
 
 pub struct CertContext(winapi::PCCERT_CONTEXT);
 
+unsafe impl Sync for CertContext {}
+unsafe impl Send for CertContext {}
+
 impl Drop for CertContext {
 	fn drop(&mut self) {
 		unsafe {
