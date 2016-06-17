@@ -584,6 +584,7 @@ impl<S> TlsStream<S>
                         self.state = if shutting_down {
                             State::Shutdown
                         } else {
+                            try!(self.validate());
                             State::Streaming {
                                 sizes: try!(self.context.stream_sizes()),
                             }
@@ -601,10 +602,7 @@ impl<S> TlsStream<S>
 
                     try!(self.step_initialize());
                 }
-                State::Streaming { sizes } => {
-                    try!(self.validate());
-                    return Ok(Some(sizes));
-                }
+                State::Streaming { sizes } => return Ok(Some(sizes)),
                 State::Shutdown => return Ok(None),
             }
         }
@@ -912,6 +910,8 @@ impl<S> BufRead for TlsStream<S>
     where S: Read + Write
 {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        try!(self.initialize());
+
         while self.get_buf().is_empty() {
             if let State::Shutdown = self.state {
                 break;
