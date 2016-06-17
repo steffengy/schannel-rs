@@ -10,7 +10,8 @@ use Inner;
 
 pub struct CertStore(winapi::HCERTSTORE);
 
-unsafe impl Send for CertStore { }
+unsafe impl Sync for CertStore {}
+unsafe impl Send for CertStore {}
 
 impl Drop for CertStore {
 	fn drop(&mut self) {
