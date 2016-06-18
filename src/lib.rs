@@ -1,8 +1,13 @@
+#![allow(non_upper_case_globals)]
+
 extern crate crypt32;
 extern crate kernel32;
 extern crate libc;
 extern crate secur32;
 extern crate winapi;
+
+#[macro_use]
+extern crate lazy_static;
 
 use libc::c_ulong;
 use std::cmp;
@@ -26,6 +31,16 @@ const INIT_REQUESTS: c_ulong =
     winapi::ISC_REQ_CONFIDENTIALITY | winapi::ISC_REQ_INTEGRITY | winapi::ISC_REQ_REPLAY_DETECT |
     winapi::ISC_REQ_SEQUENCE_DETECT | winapi::ISC_REQ_MANUAL_CRED_VALIDATION |
     winapi::ISC_REQ_ALLOCATE_MEMORY | winapi::ISC_REQ_STREAM;
+
+lazy_static! {
+    static ref UNISP_NAME: Vec<u8> = winapi::UNISP_NAME.bytes().chain(Some(0)).collect();
+    static ref szOID_PKIX_KP_SERVER_AUTH: Vec<u8> =
+        winapi::szOID_PKIX_KP_SERVER_AUTH.bytes().chain(Some(0)).collect();
+    static ref szOID_SERVER_GATED_CRYPTO: Vec<u8> =
+        winapi::szOID_SERVER_GATED_CRYPTO.bytes().chain(Some(0)).collect();
+    static ref szOID_SGC_NETSCAPE: Vec<u8> =
+        winapi::szOID_SGC_NETSCAPE.bytes().chain(Some(0)).collect();
+}
 
 struct CertContext(*mut winapi::CERT_CONTEXT);
 
@@ -200,9 +215,8 @@ impl SchannelCredBuilder {
                 Direction::Outbound => winapi::SECPKG_CRED_OUTBOUND,
             };
 
-            let mut unisp_name = winapi::UNISP_NAME.bytes().chain(Some(0u8)).collect::<Vec<u8>>();
             match secur32::AcquireCredentialsHandleA(ptr::null_mut(),
-                                                     unisp_name.as_mut_slice() as *mut _ as *mut _,
+                                                     UNISP_NAME.as_ptr() as *const _ as *mut _,
                                                      direction,
                                                      ptr::null_mut(),
                                                      &mut cred_data as *mut _ as *mut _,
@@ -636,15 +650,9 @@ impl<S> TlsStream<S>
             para.cbSize = mem::size_of_val(&para) as winapi::DWORD;
             para.RequestedUsage.dwType = winapi::USAGE_MATCH_TYPE_OR;
 
-            let mut pkix_kp_server_auth = winapi::szOID_PKIX_KP_SERVER_AUTH.as_bytes().to_owned();
-            pkix_kp_server_auth.push(0);
-            let mut server_gated_crypto = winapi::szOID_SERVER_GATED_CRYPTO.as_bytes().to_owned();
-            server_gated_crypto.push(0);
-            let mut sgc_netscape = winapi::szOID_SGC_NETSCAPE.as_bytes().to_owned();
-            sgc_netscape.push(0);
-            let mut identifiers = [pkix_kp_server_auth.as_ptr() as winapi::LPSTR,
-                                   server_gated_crypto.as_ptr() as winapi::LPSTR,
-                                   sgc_netscape.as_ptr() as winapi::LPSTR];
+            let mut identifiers = [szOID_PKIX_KP_SERVER_AUTH.as_ptr() as winapi::LPSTR,
+                                   szOID_SERVER_GATED_CRYPTO.as_ptr() as winapi::LPSTR,
+                                   szOID_SGC_NETSCAPE.as_ptr() as winapi::LPSTR];
             para.RequestedUsage.Usage.cUsageIdentifier = identifiers.len() as winapi::DWORD;
             para.RequestedUsage.Usage.rgpszUsageIdentifier = identifiers.as_mut_ptr();
 
