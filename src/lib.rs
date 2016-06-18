@@ -593,8 +593,8 @@ impl<S> TlsStream<S>
                 State::Initializing { mut needs_flush, more_calls, shutting_down } => {
                     if try!(self.write_out()) > 0 {
                         needs_flush = true;
-                        if let State::Initializing { needs_flush: ref mut n, .. } = self.state {
-                            *n = needs_flush;
+                        if let State::Initializing { ref mut needs_flush, .. } = self.state {
+                            *needs_flush = true;
                         }
                     }
 
@@ -929,10 +929,8 @@ impl<S> BufRead for TlsStream<S>
     where S: Read + Write
 {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        try!(self.initialize());
-
         while self.get_buf().is_empty() {
-            if let State::Shutdown = self.state {
+            if let None = try!(self.initialize()) {
                 break;
             }
 
