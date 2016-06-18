@@ -6,6 +6,7 @@ extern crate winapi;
 
 use libc::c_ulong;
 use std::cmp;
+use std::fmt;
 use std::io::{self, BufRead, Read, Write, Cursor};
 use std::mem;
 use std::ops::Deref;
@@ -412,6 +413,16 @@ pub struct TlsStream<S> {
     enc_in: Cursor<Vec<u8>>,
     // valid from position() to len()
     out_buf: Cursor<Vec<u8>>,
+}
+
+impl<S> fmt::Debug for TlsStream<S>
+    where S: fmt::Debug
+{
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("TlsStream")
+           .field("stream", &self.stream)
+           .finish()
+    }
 }
 
 impl<S> TlsStream<S>
