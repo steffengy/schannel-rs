@@ -42,7 +42,7 @@ lazy_static! {
         winapi::szOID_SGC_NETSCAPE.bytes().chain(Some(0)).collect();
 }
 
-struct CertContext(*mut winapi::CERT_CONTEXT);
+struct CertContext(winapi::PCERT_CONTEXT);
 
 impl Drop for CertContext {
     fn drop(&mut self) {
@@ -52,7 +52,7 @@ impl Drop for CertContext {
     }
 }
 
-struct CertChainContext(*const winapi::CERT_CHAIN_CONTEXT);
+struct CertChainContext(winapi::PCERT_CHAIN_CONTEXT);
 
 impl Drop for CertChainContext {
     fn drop(&mut self) {
@@ -668,7 +668,7 @@ impl<S> TlsStream<S>
                                                        &mut cert_chain);
 
             if res == winapi::TRUE {
-                CertChainContext(cert_chain)
+                CertChainContext(cert_chain as *mut _)
             } else {
                 return Err(io::Error::last_os_error());
             }
