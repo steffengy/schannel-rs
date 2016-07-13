@@ -15,7 +15,4 @@ kernel32-sys = "0.2"
 lazy_static = "0.2"
 libc = "0.2"
 secur32-sys="0.2"
-winapi = "0.2"
-
-[replace]
-"winapi:0.2.7" = { git = "https://github.com/sfackler/winapi-rs" }
+winapi = "0.2.8"
