@@ -3,13 +3,13 @@ use std::net::TcpStream;
 use winapi;
 
 use schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
-use tls_stream::TlsStreamBuilder;
+use tls_stream;
 
 #[test]
 fn basic() {
     let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
-    let mut stream = TlsStreamBuilder::new()
+    let mut stream = tls_stream::Builder::new()
         .domain("google.com")
         .initialize(creds, stream)
         .unwrap();
@@ -36,7 +36,7 @@ fn valid_algorithms() {
         .acquire(Direction::Outbound)
         .unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
-    let mut stream = TlsStreamBuilder::new()
+    let mut stream = tls_stream::Builder::new()
         .domain("google.com")
         .initialize(creds, stream)
         .unwrap();
@@ -55,7 +55,7 @@ fn invalid_protocol() {
         .acquire(Direction::Outbound)
         .unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
-    let err = TlsStreamBuilder::new()
+    let err = tls_stream::Builder::new()
         .domain("google.com")
         .initialize(creds, stream)
         .err()
@@ -70,7 +70,7 @@ fn valid_protocol() {
         .acquire(Direction::Outbound)
         .unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
-    let mut stream = TlsStreamBuilder::new()
+    let mut stream = tls_stream::Builder::new()
         .domain("google.com")
         .initialize(creds, stream)
         .unwrap();
@@ -87,7 +87,7 @@ fn expired_cert() {
         .acquire(Direction::Outbound)
         .unwrap();
     let stream = TcpStream::connect("expired.badssl.com:443").unwrap();
-    let err = TlsStreamBuilder::new()
+    let err = tls_stream::Builder::new()
         .domain("expired.badssl.com")
         .initialize(creds, stream)
         .err()
@@ -101,7 +101,7 @@ fn self_signed_cert() {
         .acquire(Direction::Outbound)
         .unwrap();
     let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
-    let err = TlsStreamBuilder::new()
+    let err = tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
         .initialize(creds, stream)
         .err()
@@ -115,7 +115,7 @@ fn wrong_host_cert() {
         .acquire(Direction::Outbound)
         .unwrap();
     let stream = TcpStream::connect("wrong.host.badssl.com:443").unwrap();
-    let err = TlsStreamBuilder::new()
+    let err = tls_stream::Builder::new()
         .domain("wrong.host.badssl.com")
         .initialize(creds, stream)
         .err()
@@ -127,7 +127,7 @@ fn wrong_host_cert() {
 fn shutdown() {
     let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
-    let mut stream = TlsStreamBuilder::new()
+    let mut stream = tls_stream::Builder::new()
         .domain("google.com")
         .initialize(creds, stream)
         .unwrap();

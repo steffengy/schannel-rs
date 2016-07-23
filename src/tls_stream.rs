@@ -34,22 +34,22 @@ impl Drop for CertChainContext {
 }
 
 #[derive(Default)]
-pub struct TlsStreamBuilder {
+pub struct Builder {
     domain: Option<Vec<u16>>,
     cert_store: Option<CertStore>,
 }
 
-impl TlsStreamBuilder {
-    pub fn new() -> TlsStreamBuilder {
-        TlsStreamBuilder::default()
+impl Builder {
+    pub fn new() -> Builder {
+        Builder::default()
     }
 
-    pub fn domain(&mut self, domain: &str) -> &mut TlsStreamBuilder {
+    pub fn domain(&mut self, domain: &str) -> &mut Builder {
         self.domain = Some(domain.encode_utf16().chain(Some(0)).collect());
         self
     }
 
-    pub fn cert_store(&mut self, cert_store: CertStore) -> &mut TlsStreamBuilder {
+    pub fn cert_store(&mut self, cert_store: CertStore) -> &mut Builder {
         self.cert_store = Some(cert_store);
         self
     }
