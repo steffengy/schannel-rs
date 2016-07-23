@@ -49,7 +49,8 @@ impl Builder {
         self
     }
 
-    pub fn cert_store(&mut self, cert_store: CertStore) -> &mut Builder {
+    #[allow(dead_code)]
+    /* pub */ fn cert_store(&mut self, cert_store: CertStore) -> &mut Builder {
         self.cert_store = Some(cert_store);
         self
     }

@@ -9,8 +9,10 @@ extern crate winapi;
 #[macro_use]
 extern crate lazy_static;
 
-pub mod cert_store;
-pub mod ctl_context;
+#[allow(dead_code)]
+/* pub */ mod cert_store;
+#[allow(dead_code)]
+/* pub */ mod ctl_context;
 pub mod schannel_cred;
 pub mod tls_stream;
 
