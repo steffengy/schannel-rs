@@ -61,7 +61,7 @@ impl Builder {
 		self
 	}
 
-	pub fn build(&self) -> io::Result<Vec<u8>> {
+	pub fn encode_and_sign(&self) -> io::Result<Vec<u8>> {
 		unsafe {
 			let encoding = winapi::X509_ASN_ENCODING | winapi::PKCS_7_ASN_ENCODING;
 
@@ -186,7 +186,7 @@ mod test {
         CtlContext::builder()
         	.certificate(cert)
             .usage("1.3.6.1.4.1.311.2.2.2")
-            .build()
+            .encode_and_sign()
             .unwrap();
 	}
 }
