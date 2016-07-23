@@ -7,6 +7,11 @@ use winapi;
 use cert_context::CertContext;
 use Inner;
 
+lazy_static! {
+	static ref szOID_OIWSEC_sha1: Vec<u8> =
+		winapi::szOID_OIWSEC_sha1.bytes().chain(Some(0)).collect();
+}
+
 pub struct CtlContext(winapi::PCCTL_CONTEXT);
 
 unsafe impl Send for CtlContext {}
@@ -78,9 +83,7 @@ impl Builder {
 			ctl_info.dwVersion = winapi::CTL_V1;
 			ctl_info.SubjectUsage.cUsageIdentifier = usages.len() as winapi::DWORD;
 			ctl_info.SubjectUsage.rgpszUsageIdentifier = usages.as_mut_ptr() as *mut winapi::LPSTR;
-			let mut algorithm = winapi::szOID_OIWSEC_sha1.as_bytes().to_owned();
-			algorithm.push(0);
-			ctl_info.SubjectAlgorithm.pszObjId = algorithm.as_ptr() as winapi::LPSTR;
+			ctl_info.SubjectAlgorithm.pszObjId = szOID_OIWSEC_sha1.as_ptr() as winapi::LPSTR;
 			ctl_info.cCTLEntry = entries.len() as winapi::DWORD;
 			ctl_info.rgCTLEntry = entries.as_mut_ptr();
 
