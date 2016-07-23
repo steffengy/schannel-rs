@@ -122,22 +122,22 @@ impl Protocol {
     }
 }
 
-pub struct SchannelCredBuilder {
+pub struct Builder {
     supported_algorithms: Option<Vec<Algorithm>>,
     enabled_protocols: Option<Vec<Protocol>>,
 }
 
-impl SchannelCredBuilder {
+impl Builder {
     /// Sets the algorithms supported for sessions created from this builder.
     pub fn supported_algorithms(mut self,
                                 supported_algorithms: &[Algorithm])
-                                -> SchannelCredBuilder {
+                                -> Builder {
         self.supported_algorithms = Some(supported_algorithms.to_owned());
         self
     }
 
     /// Sets the protocols enabled for sessions created from this builder.
-    pub fn enabled_protocols(mut self, enabled_protocols: &[Protocol]) -> SchannelCredBuilder {
+    pub fn enabled_protocols(mut self, enabled_protocols: &[Protocol]) -> Builder {
         self.enabled_protocols = Some(enabled_protocols.to_owned());
         self
     }
@@ -204,8 +204,8 @@ impl Inner<winapi::CredHandle> for SchannelCred {
 }
 
 impl SchannelCred {
-    pub fn builder() -> SchannelCredBuilder {
-        SchannelCredBuilder {
+    pub fn builder() -> Builder {
+        Builder {
             supported_algorithms: None,
             enabled_protocols: None,
         }
