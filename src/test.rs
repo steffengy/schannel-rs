@@ -133,3 +133,19 @@ fn shutdown() {
         .unwrap();
     stream.shutdown().unwrap();
 }
+
+#[test]
+fn validation_failure_is_permanent() {
+    let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
+    let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
+    // temporarily switch to nonblocking to allow us to construct the stream
+    // without validating
+    stream.set_nonblocking(true).unwrap();
+    let mut stream = tls_stream::Builder::new()
+        .domain("self-signed.badssl.com")
+        .initialize(creds, stream)
+        .unwrap();
+    stream.get_ref().set_nonblocking(false).unwrap();
+    assert!(stream.write(b"hi").is_err());
+    assert!(stream.write(b"hi").is_err());
+}
