@@ -132,12 +132,26 @@ impl Builder {
     pub fn supported_algorithms(mut self,
                                 supported_algorithms: &[Algorithm])
                                 -> Builder {
+        assert!(supported_algorithms.iter()
+                                    .all(|a| {
+                                        match *a {
+                                            Algorithm::__ForExtensibility => false,
+                                            _ => true
+                                        }
+                                    }));
         self.supported_algorithms = Some(supported_algorithms.to_owned());
         self
     }
 
     /// Sets the protocols enabled for sessions created from this builder.
     pub fn enabled_protocols(mut self, enabled_protocols: &[Protocol]) -> Builder {
+        assert!(enabled_protocols.iter()
+                                 .all(|a| {
+                                    match *a {
+                                        Protocol::__ForExtensibility => false,
+                                        _ => true
+                                    }
+                                 }));
         self.enabled_protocols = Some(enabled_protocols.to_owned());
         self
     }
