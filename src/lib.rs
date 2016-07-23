@@ -140,6 +140,8 @@ pub enum Algorithm {
     TripleDes = winapi::CALG_3DES,
     /// Two-key triple DES encryption with effective key length equal to 112 bits.
     TripleDes112 = winapi::CALG_3DES_112,
+    #[doc(hidden)]
+    __ForExtensibility,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -152,24 +154,22 @@ pub enum Protocol {
     Tls11,
     /// Transport Layer Security 1.2
     Tls12,
+    #[doc(hidden)]
+    __ForExtensibility,
 }
 
 impl Protocol {
     fn dword(self, direction: Direction) -> winapi::DWORD {
-        if direction == Direction::Inbound {
-            match self {
-                Protocol::Ssl3 => winapi::SP_PROT_SSL3_SERVER,
-                Protocol::Tls10 => winapi::SP_PROT_TLS1_0_SERVER,
-                Protocol::Tls11 => winapi::SP_PROT_TLS1_1_SERVER,
-                Protocol::Tls12 => winapi::SP_PROT_TLS1_2_SERVER,
-            }
-        } else {
-            match self {
-                Protocol::Ssl3 => winapi::SP_PROT_SSL3_CLIENT,
-                Protocol::Tls10 => winapi::SP_PROT_TLS1_0_CLIENT,
-                Protocol::Tls11 => winapi::SP_PROT_TLS1_1_CLIENT,
-                Protocol::Tls12 => winapi::SP_PROT_TLS1_2_CLIENT,
-            }
+        match (self, direction) {
+            (Protocol::Ssl3, Direction::Inbound) => winapi::SP_PROT_SSL3_SERVER,
+            (Protocol::Tls10, Direction::Inbound) => winapi::SP_PROT_TLS1_0_SERVER,
+            (Protocol::Tls11, Direction::Inbound) => winapi::SP_PROT_TLS1_1_SERVER,
+            (Protocol::Tls12, Direction::Inbound) => winapi::SP_PROT_TLS1_2_SERVER,
+            (Protocol::Ssl3, Direction::Outbound) => winapi::SP_PROT_SSL3_CLIENT,
+            (Protocol::Tls10, Direction::Outbound) => winapi::SP_PROT_TLS1_0_CLIENT,
+            (Protocol::Tls11, Direction::Outbound) => winapi::SP_PROT_TLS1_1_CLIENT,
+            (Protocol::Tls12, Direction::Outbound) => winapi::SP_PROT_TLS1_2_CLIENT,
+            (Protocol::__ForExtensibility, _) => unreachable!(),
         }
     }
 }
