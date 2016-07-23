@@ -181,7 +181,7 @@ mod test {
         file.read_to_end(&mut cert).unwrap();
 
         let mut store = CertStore::memory().unwrap();
-        let cert = store.add_der_certificate(&cert).unwrap();
+        let cert = store.add_encoded_certificate(&cert).unwrap();
 
         CtlContext::builder()
         	.certificate(cert)

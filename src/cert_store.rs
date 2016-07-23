@@ -63,7 +63,7 @@ impl CertStore {
 pub struct Memory(CertStore);
 
 impl Memory {
-	pub fn add_der_certificate(&mut self, cert: &[u8]) -> io::Result<CertContext> {
+	pub fn add_encoded_certificate(&mut self, cert: &[u8]) -> io::Result<CertContext> {
 		unsafe {
 			let mut cert_context = ptr::null();
 
@@ -82,7 +82,7 @@ impl Memory {
 		}
 	}
 
-	pub fn add_der_ctl(&mut self, ctl: &[u8]) -> io::Result<CtlContext> {
+	pub fn add_encoded_ctl(&mut self, ctl: &[u8]) -> io::Result<CtlContext> {
 		unsafe {
 			let mut ctl_context = ptr::null();
 
@@ -121,6 +121,6 @@ mod test {
 		file.read_to_end(&mut cert).unwrap();
 
 		let mut store = CertStore::memory().unwrap();
-		store.add_der_certificate(&cert).unwrap();
+		store.add_encoded_certificate(&cert).unwrap();
 	}
 }
