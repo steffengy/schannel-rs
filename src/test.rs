@@ -146,6 +146,8 @@ fn validation_failure_is_permanent() {
         .initialize(creds, stream)
         .unwrap();
     stream.get_ref().set_nonblocking(false).unwrap();
-    assert!(stream.write(b"hi").is_err());
-    assert!(stream.write(b"hi").is_err());
+    assert_eq!(stream.write(b"hi").err().unwrap().raw_os_error().unwrap(),
+               winapi::CERT_E_UNTRUSTEDROOT as i32);
+    assert_eq!(stream.write(b"hi").err().unwrap().raw_os_error().unwrap(),
+               winapi::CERT_E_UNTRUSTEDROOT as i32);
 }
