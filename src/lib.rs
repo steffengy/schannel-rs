@@ -14,20 +14,47 @@ use std::cmp;
 use std::fmt;
 use std::io::{self, BufRead, Read, Write, Cursor};
 use std::mem;
-use std::ops::Deref;
 use std::ptr;
-use std::slice;
 
 use cert_store::CertStore;
 use schannel_cred::SchannelCred;
+use security_context::SecurityContext;
+use fuck_visibility::ContextBuffer;
 
 pub mod cert_context;
 pub mod cert_store;
 pub mod ctl_context;
 pub mod schannel_cred;
 
+mod security_context;
+
 #[cfg(test)]
 mod test;
+
+mod fuck_visibility {
+    use winapi;
+    use secur32;
+    use std::ops::Deref;
+    use std::slice;
+
+    pub struct ContextBuffer(pub winapi::SecBuffer);
+
+    impl Drop for ContextBuffer {
+        fn drop(&mut self) {
+            unsafe {
+                secur32::FreeContextBuffer(self.0.pvBuffer);
+            }
+        }
+    }
+
+    impl Deref for ContextBuffer {
+        type Target = [u8];
+
+        fn deref(&self) -> &[u8] {
+            unsafe { slice::from_raw_parts(self.0.pvBuffer as *const _, self.0.cbBuffer as usize) }
+        }
+    }
+}
 
 const INIT_REQUESTS: c_ulong =
     winapi::ISC_REQ_CONFIDENTIALITY | winapi::ISC_REQ_INTEGRITY | winapi::ISC_REQ_REPLAY_DETECT |
@@ -41,16 +68,6 @@ lazy_static! {
         winapi::szOID_SERVER_GATED_CRYPTO.bytes().chain(Some(0)).collect();
     static ref szOID_SGC_NETSCAPE: Vec<u8> =
         winapi::szOID_SGC_NETSCAPE.bytes().chain(Some(0)).collect();
-}
-
-struct CertContext(winapi::PCERT_CONTEXT);
-
-impl Drop for CertContext {
-    fn drop(&mut self) {
-        unsafe {
-            crypt32::CertFreeCertificateContext(self.0);
-        }
-    }
 }
 
 struct CertChainContext(winapi::PCERT_CHAIN_CONTEXT);
@@ -114,103 +131,6 @@ impl TlsStreamBuilder {
         }
 
         Ok(stream)
-    }
-}
-
-struct SecurityContext(winapi::CtxtHandle);
-
-impl Drop for SecurityContext {
-    fn drop(&mut self) {
-        unsafe {
-            secur32::DeleteSecurityContext(&mut self.0);
-        }
-    }
-}
-
-impl SecurityContext {
-    fn initialize(cred: &mut SchannelCred,
-                  domain: Option<&[u16]>)
-                  -> io::Result<(SecurityContext, ContextBuffer)> {
-        unsafe {
-            let domain = domain.map(|b| b.as_ptr() as *mut u16).unwrap_or(ptr::null_mut());
-
-            let mut ctxt = mem::uninitialized();
-
-            let mut outbuf = winapi::SecBuffer {
-                cbBuffer: 0,
-                BufferType: winapi::SECBUFFER_EMPTY,
-                pvBuffer: ptr::null_mut(),
-            };
-            let mut outbuf_desc = winapi::SecBufferDesc {
-                ulVersion: winapi::SECBUFFER_VERSION,
-                cBuffers: 1,
-                pBuffers: &mut outbuf,
-            };
-
-            let mut attributes = 0;
-
-            match secur32::InitializeSecurityContextW(cred.get_mut(),
-                                                      ptr::null_mut(),
-                                                      domain,
-                                                      INIT_REQUESTS,
-                                                      0,
-                                                      0,
-                                                      ptr::null_mut(),
-                                                      0,
-                                                      &mut ctxt,
-                                                      &mut outbuf_desc,
-                                                      &mut attributes,
-                                                      ptr::null_mut()) {
-                winapi::SEC_I_CONTINUE_NEEDED => Ok((SecurityContext(ctxt), ContextBuffer(outbuf))),
-                err => Err(io::Error::from_raw_os_error(err as i32)),
-            }
-        }
-    }
-
-    fn stream_sizes(&mut self) -> io::Result<winapi::SecPkgContext_StreamSizes> {
-        unsafe {
-            let mut stream_sizes = mem::uninitialized();
-            let status = secur32::QueryContextAttributesW(&mut self.0,
-                                                          winapi::SECPKG_ATTR_STREAM_SIZES,
-                                                          &mut stream_sizes as *mut _ as *mut _);
-            if status == winapi::SEC_E_OK {
-                Ok(stream_sizes)
-            } else {
-                Err(io::Error::from_raw_os_error(status as i32))
-            }
-        }
-    }
-
-    fn remote_cert(&mut self) -> io::Result<CertContext> {
-        unsafe {
-            let mut cert_context = mem::uninitialized();
-            let status = secur32::QueryContextAttributesW(&mut self.0,
-                                                          winapi::SECPKG_ATTR_REMOTE_CERT_CONTEXT,
-                                                          &mut cert_context as *mut _ as *mut _);
-            if status == winapi::SEC_E_OK {
-                Ok(CertContext(cert_context))
-            } else {
-                Err(io::Error::from_raw_os_error(status as i32))
-            }
-        }
-    }
-}
-
-struct ContextBuffer(winapi::SecBuffer);
-
-impl Drop for ContextBuffer {
-    fn drop(&mut self) {
-        unsafe {
-            secur32::FreeContextBuffer(self.0.pvBuffer);
-        }
-    }
-}
-
-impl Deref for ContextBuffer {
-    type Target = [u8];
-
-    fn deref(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(self.0.pvBuffer as *const _, self.0.cbBuffer as usize) }
     }
 }
 
@@ -280,7 +200,7 @@ impl<S> TlsStream<S>
                         cBuffers: 1,
                         pBuffers: &mut buf,
                     };
-                    match secur32::ApplyControlToken(&mut self.context.0, &mut desc) {
+                    match secur32::ApplyControlToken(self.context.get_mut(), &mut desc) {
                         winapi::SEC_E_OK => {}
                         err => return Err(io::Error::from_raw_os_error(err as i32)),
                     }
@@ -340,7 +260,7 @@ impl<S> TlsStream<S>
             let mut attributes = 0;
 
             let status = secur32::InitializeSecurityContextW(self.cred.get_mut(),
-                                                             &mut self.context.0,
+                                                             self.context.get_mut(),
                                                              domain,
                                                              INIT_REQUESTS,
                                                              0,
@@ -472,7 +392,7 @@ impl<S> TlsStream<S>
             let mut cert_chain = mem::uninitialized();
 
             let res = crypt32::CertGetCertificateChain(ptr::null_mut(),
-                                                       cert_context.0,
+                                                       cert_context.as_inner(),
                                                        ptr::null_mut(),
                                                        cert_store,
                                                        &mut para,
@@ -588,7 +508,7 @@ impl<S> TlsStream<S>
                 pBuffers: bufs.as_mut_ptr(),
             };
 
-            match secur32::DecryptMessage(&mut self.context.0, &mut bufdesc, 0, ptr::null_mut()) {
+            match secur32::DecryptMessage(self.context.get_mut(), &mut bufdesc, 0, ptr::null_mut()) {
                 winapi::SEC_E_OK => {
                     let start = bufs[1].pvBuffer as usize - self.enc_in.get_ref().as_ptr() as usize;
                     let end = start + bufs[1].cbBuffer as usize;
@@ -678,7 +598,7 @@ impl<S> TlsStream<S>
                 pBuffers: bufs.as_mut_ptr(),
             };
 
-            match secur32::EncryptMessage(&mut self.context.0, 0, &mut bufdesc, 0) {
+            match secur32::EncryptMessage(self.context.get_mut(), 0, &mut bufdesc, 0) {
                 winapi::SEC_E_OK => {
                     let len = bufs[0].cbBuffer + bufs[1].cbBuffer + bufs[2].cbBuffer;
                     self.out_buf.get_mut().truncate(len as usize);
