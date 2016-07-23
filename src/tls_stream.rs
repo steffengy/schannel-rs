@@ -11,7 +11,7 @@ use winapi;
 use {INIT_REQUESTS, Inner};
 use cert_store::CertStore;
 use security_context::SecurityContext;
-use fuck_visibility::ContextBuffer;
+use context_buffer::ContextBuffer;
 use schannel_cred::SchannelCred;
 
 lazy_static! {

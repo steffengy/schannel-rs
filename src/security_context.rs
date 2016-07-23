@@ -6,7 +6,7 @@ use std::io;
 
 use {INIT_REQUESTS, Inner};
 use cert_context::CertContext;
-use fuck_visibility::ContextBuffer;
+use context_buffer::ContextBuffer;
 
 use schannel_cred::SchannelCred;
 
