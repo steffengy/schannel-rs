@@ -231,8 +231,10 @@ impl<S> TlsStream<S>
                                                              &mut attributes,
                                                              ptr::null_mut());
 
-            if !outbufs[1].pvBuffer.is_null() {
-                secur32::FreeContextBuffer(outbufs[1].pvBuffer);
+            for buf in &outbufs[1..] {
+                if !buf.pvBuffer.is_null() {
+                    secur32::FreeContextBuffer(buf.pvBuffer);
+                }
             }
 
             match status {
