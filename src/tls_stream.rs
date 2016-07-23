@@ -204,10 +204,15 @@ impl<S> TlsStream<S>
                                     cbBuffer: 0,
                                     BufferType: winapi::SECBUFFER_ALERT,
                                     pvBuffer: ptr::null_mut(),
+                                },
+                                winapi::SecBuffer {
+                                    cbBuffer: 0,
+                                    BufferType: winapi::SECBUFFER_EMPTY,
+                                    pvBuffer: ptr::null_mut(),
                                 }];
             let mut outbuf_desc = winapi::SecBufferDesc {
                 ulVersion: winapi::SECBUFFER_VERSION,
-                cBuffers: 2,
+                cBuffers: 3,
                 pBuffers: outbufs.as_mut_ptr(),
             };
 
