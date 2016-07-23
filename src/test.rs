@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use winapi;
 
+use schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
 use super::*;
 
 #[test]

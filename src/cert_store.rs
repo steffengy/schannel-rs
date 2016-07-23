@@ -37,6 +37,10 @@ impl Inner<winapi::HCERTSTORE> for CertStore {
 	fn as_inner(&self) -> winapi::HCERTSTORE {
 		self.0
 	}
+
+	fn get_mut(&mut self) -> &mut winapi::HCERTSTORE {
+		&mut self.0
+	}
 }
 
 impl CertStore {

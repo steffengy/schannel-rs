@@ -24,4 +24,8 @@ impl Inner<winapi::PCCERT_CONTEXT> for CertContext {
 	fn as_inner(&self) -> winapi::PCCERT_CONTEXT {
 		self.0
 	}
+
+	fn get_mut(&mut self) -> &mut winapi::PCCERT_CONTEXT {
+		&mut self.0
+	}
 }

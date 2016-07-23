@@ -28,6 +28,10 @@ impl Inner<winapi::PCCTL_CONTEXT> for CtlContext {
 	fn as_inner(&self) -> winapi::PCCTL_CONTEXT {
 		self.0
 	}
+
+	fn get_mut(&mut self) -> &mut winapi::PCCTL_CONTEXT {
+		&mut self.0
+	}
 }
 
 impl CtlContext {
