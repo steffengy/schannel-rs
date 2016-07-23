@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use winapi;
 
 use schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
-use super::*;
+use tls_stream::TlsStreamBuilder;
 
 #[test]
 fn basic() {
