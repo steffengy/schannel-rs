@@ -1,3 +1,5 @@
+//! Bindings to the Windows SChannel APIs.
+#![warn(missing_docs)]
 #![allow(non_upper_case_globals)]
 
 extern crate crypt32;

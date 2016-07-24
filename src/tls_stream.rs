@@ -1,3 +1,4 @@
+//! Schannel TLS streams.
 use crypt32;
 use secur32;
 use libc;
@@ -33,17 +34,23 @@ impl Drop for CertChainContext {
     }
 }
 
-#[derive(Default)]
+/// A builder type for `TlsStream`s.
+#[derive(Default, Debug)]
 pub struct Builder {
     domain: Option<Vec<u16>>,
     cert_store: Option<CertStore>,
 }
 
 impl Builder {
+    /// Returns a new `Builder`.
     pub fn new() -> Builder {
         Builder::default()
     }
 
+    /// Sets the domain associated with connections created with this `Builder`.
+    ///
+    /// The domain will be used for Server Name Indication as well as
+    /// certificate validation.
     pub fn domain(&mut self, domain: &str) -> &mut Builder {
         self.domain = Some(domain.encode_utf16().chain(Some(0)).collect());
         self
@@ -55,6 +62,7 @@ impl Builder {
         self
     }
 
+    /// Initializes a new TLS session.
     pub fn initialize<S>(&self, mut cred: SchannelCred, stream: S) -> io::Result<TlsStream<S>>
         where S: Read + Write
     {
@@ -98,6 +106,7 @@ enum State {
     Shutdown,
 }
 
+/// An Schannel TLS stream.
 pub struct TlsStream<S> {
     cred: SchannelCred,
     context: SecurityContext,
@@ -127,14 +136,26 @@ impl<S> fmt::Debug for TlsStream<S>
 impl<S> TlsStream<S>
     where S: Read + Write
 {
+    /// Returns a reference to the wrapped stream.
     pub fn get_ref(&self) -> &S {
         &self.stream
     }
 
+    /// Returns a mutable reference to the wrapped stream.
     pub fn get_mut(&mut self) -> &mut S {
         &mut self.stream
     }
 
+    /// Returns a reference to the buffer of pending data.
+    ///
+    /// Like `BufRead::fill_buf` except that it will return an empty slice
+    /// rather than reading from the wrapped stream if there is no buffered
+    /// data.
+    pub fn get_buf(&self) -> &[u8] {
+        &self.dec_in.get_ref()[self.dec_in.position() as usize..]
+    }
+
+    /// Shuts the TLS session down.
     pub fn shutdown(&mut self) -> io::Result<()> {
         match self.state {
             State::Shutdown => return Ok(()),
@@ -568,10 +589,6 @@ impl<S> TlsStream<S>
                 err => Err(io::Error::from_raw_os_error(err as i32)),
             }
         }
-    }
-
-    fn get_buf(&self) -> &[u8] {
-        &self.dec_in.get_ref()[self.dec_in.position() as usize..]
     }
 }
 

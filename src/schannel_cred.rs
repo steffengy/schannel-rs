@@ -1,3 +1,4 @@
+//! Schannel credentials.
 use winapi;
 use secur32;
 use std::io;
@@ -10,13 +11,17 @@ lazy_static! {
     static ref UNISP_NAME: Vec<u8> = winapi::UNISP_NAME.bytes().chain(Some(0)).collect();
 }
 
+/// The communication direction that an `SchannelCred` will support.
 #[derive(Copy, Debug, Clone, PartialEq, Eq)]
 pub enum Direction {
+    /// Server-side, inbound connections.
     Inbound,
+    /// Client-side, outbound connections.
     Outbound,
 }
 
-/// https://msdn.microsoft.com/en-us/library/windows/desktop/aa375549(v=vs.85).aspx
+/// Algorithms supported by Schannel.
+// https://msdn.microsoft.com/en-us/library/windows/desktop/aa375549(v=vs.85).aspx
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
 pub enum Algorithm {
@@ -92,6 +97,7 @@ pub enum Algorithm {
     __ForExtensibility,
 }
 
+/// Protocols supported by Schannel.
 #[derive(Debug, Copy, Clone)]
 pub enum Protocol {
     /// Secure Sockets Layer 3.0
@@ -122,13 +128,20 @@ impl Protocol {
     }
 }
 
+/// A builder type for `SchannelCred`s.
+#[derive(Default, Debug)]
 pub struct Builder {
     supported_algorithms: Option<Vec<Algorithm>>,
     enabled_protocols: Option<Vec<Protocol>>,
 }
 
 impl Builder {
-    /// Sets the algorithms supported for sessions created from this builder.
+    /// Returns a new `Builder`.
+    pub fn new() -> Builder {
+        Builder::default()
+    }
+
+    /// Sets the algorithms supported for credentials created from this builder.
     pub fn supported_algorithms(mut self, supported_algorithms: &[Algorithm]) -> Builder {
         assert!(supported_algorithms.iter()
             .all(|a| {
@@ -141,7 +154,7 @@ impl Builder {
         self
     }
 
-    /// Sets the protocols enabled for sessions created from this builder.
+    /// Sets the protocols enabled for credentials created from this builder.
     pub fn enabled_protocols(mut self, enabled_protocols: &[Protocol]) -> Builder {
         assert!(enabled_protocols.iter()
             .all(|a| {
@@ -154,6 +167,7 @@ impl Builder {
         self
     }
 
+    /// Creates a new `SchannelCred`.
     pub fn acquire(&self, direction: Direction) -> io::Result<SchannelCred> {
         unsafe {
             let mut handle = mem::uninitialized();
@@ -191,6 +205,7 @@ impl Builder {
     }
 }
 
+/// An SChannel credential.
 pub struct SchannelCred(winapi::CredHandle);
 
 impl Drop for SchannelCred {
@@ -216,10 +231,8 @@ impl Inner<winapi::CredHandle> for SchannelCred {
 }
 
 impl SchannelCred {
+    /// Returns a builder.
     pub fn builder() -> Builder {
-        Builder {
-            supported_algorithms: None,
-            enabled_protocols: None,
-        }
+        Builder::new()
     }
 }

@@ -1,5 +1,6 @@
 use crypt32;
 use std::io;
+use std::fmt;
 use std::ptr;
 use winapi;
 
@@ -12,6 +13,12 @@ pub struct CertStore(winapi::HCERTSTORE);
 
 unsafe impl Sync for CertStore {}
 unsafe impl Send for CertStore {}
+
+impl fmt::Debug for CertStore {
+	fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+		fmt.debug_struct("CertStore").finish()
+	}
+}
 
 impl Drop for CertStore {
     fn drop(&mut self) {
