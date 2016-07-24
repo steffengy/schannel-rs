@@ -94,9 +94,7 @@ enum State {
         more_calls: bool,
         shutting_down: bool,
     },
-    Streaming {
-        sizes: winapi::SecPkgContext_StreamSizes,
-    },
+    Streaming { sizes: winapi::SecPkgContext_StreamSizes, },
     Shutdown,
 }
 
@@ -121,8 +119,8 @@ impl<S> fmt::Debug for TlsStream<S>
 {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("TlsStream")
-           .field("stream", &self.stream)
-           .finish()
+            .field("stream", &self.stream)
+            .finish()
     }
 }
 
@@ -304,9 +302,7 @@ impl<S> TlsStream<S>
                             State::Shutdown
                         } else {
                             try!(self.validate());
-                            State::Streaming {
-                                sizes: try!(self.context.stream_sizes()),
-                            }
+                            State::Streaming { sizes: try!(self.context.stream_sizes()) }
                         };
 
                         continue;
@@ -332,9 +328,9 @@ impl<S> TlsStream<S>
 
         let cert_chain = unsafe {
             let cert_store = self.cert_store
-                                 .as_ref()
-                                 .map(|s| s.as_inner())
-                                 .unwrap_or(ptr::null_mut());
+                .as_ref()
+                .map(|s| s.as_inner())
+                .unwrap_or(ptr::null_mut());
 
             let flags = winapi::CERT_CHAIN_CACHE_END_CERT |
                         winapi::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY |
@@ -469,7 +465,10 @@ impl<S> TlsStream<S>
                 pBuffers: bufs.as_mut_ptr(),
             };
 
-            match secur32::DecryptMessage(self.context.get_mut(), &mut bufdesc, 0, ptr::null_mut()) {
+            match secur32::DecryptMessage(self.context.get_mut(),
+                                          &mut bufdesc,
+                                          0,
+                                          ptr::null_mut()) {
                 winapi::SEC_E_OK => {
                     let start = bufs[1].pvBuffer as usize - self.enc_in.get_ref().as_ptr() as usize;
                     let end = start + bufs[1].cbBuffer as usize;
@@ -647,4 +646,3 @@ impl<S> BufRead for TlsStream<S>
         self.dec_in.set_position(pos);
     }
 }
-

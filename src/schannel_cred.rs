@@ -129,16 +129,14 @@ pub struct Builder {
 
 impl Builder {
     /// Sets the algorithms supported for sessions created from this builder.
-    pub fn supported_algorithms(mut self,
-                                supported_algorithms: &[Algorithm])
-                                -> Builder {
+    pub fn supported_algorithms(mut self, supported_algorithms: &[Algorithm]) -> Builder {
         assert!(supported_algorithms.iter()
-                                    .all(|a| {
-                                        match *a {
-                                            Algorithm::__ForExtensibility => false,
-                                            _ => true
-                                        }
-                                    }));
+            .all(|a| {
+                match *a {
+                    Algorithm::__ForExtensibility => false,
+                    _ => true,
+                }
+            }));
         self.supported_algorithms = Some(supported_algorithms.to_owned());
         self
     }
@@ -146,12 +144,12 @@ impl Builder {
     /// Sets the protocols enabled for sessions created from this builder.
     pub fn enabled_protocols(mut self, enabled_protocols: &[Protocol]) -> Builder {
         assert!(enabled_protocols.iter()
-                                 .all(|a| {
-                                    match *a {
-                                        Protocol::__ForExtensibility => false,
-                                        _ => true
-                                    }
-                                 }));
+            .all(|a| {
+                match *a {
+                    Protocol::__ForExtensibility => false,
+                    _ => true,
+                }
+            }));
         self.enabled_protocols = Some(enabled_protocols.to_owned());
         self
     }
@@ -168,8 +166,8 @@ impl Builder {
             }
             if let Some(ref enabled_protocols) = self.enabled_protocols {
                 cred_data.grbitEnabledProtocols = enabled_protocols.iter()
-                                                                   .map(|p| p.dword(direction))
-                                                                   .fold(0, |acc, p| acc | p);
+                    .map(|p| p.dword(direction))
+                    .fold(0, |acc, p| acc | p);
             }
 
             let direction = match direction {

@@ -21,23 +21,23 @@ impl Drop for SecurityContext {
 }
 
 impl Inner<winapi::CtxtHandle> for SecurityContext {
-	unsafe fn from_inner(inner: winapi::CtxtHandle) -> SecurityContext {
-		SecurityContext(inner)
-	}
+    unsafe fn from_inner(inner: winapi::CtxtHandle) -> SecurityContext {
+        SecurityContext(inner)
+    }
 
-	fn as_inner(&self) -> winapi::CtxtHandle {
-		self.0
-	}
+    fn as_inner(&self) -> winapi::CtxtHandle {
+        self.0
+    }
 
-	fn get_mut(&mut self) -> &mut winapi::CtxtHandle {
-		&mut self.0
-	}
+    fn get_mut(&mut self) -> &mut winapi::CtxtHandle {
+        &mut self.0
+    }
 }
 
 impl SecurityContext {
     pub fn initialize(cred: &mut SchannelCred,
-                  domain: Option<&[u16]>)
-                  -> io::Result<(SecurityContext, ContextBuffer)> {
+                      domain: Option<&[u16]>)
+                      -> io::Result<(SecurityContext, ContextBuffer)> {
         unsafe {
             let domain = domain.map(|b| b.as_ptr() as *mut u16).unwrap_or(ptr::null_mut());
 

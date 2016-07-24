@@ -60,7 +60,8 @@ fn invalid_protocol() {
         .initialize(creds, stream)
         .err()
         .unwrap();
-    assert_eq!(err.raw_os_error().unwrap(), winapi::SEC_E_UNSUPPORTED_FUNCTION as i32);
+    assert_eq!(err.raw_os_error().unwrap(),
+               winapi::SEC_E_UNSUPPORTED_FUNCTION as i32);
 }
 
 #[test]
@@ -106,7 +107,8 @@ fn self_signed_cert() {
         .initialize(creds, stream)
         .err()
         .unwrap();
-    assert_eq!(err.raw_os_error().unwrap(), winapi::CERT_E_UNTRUSTEDROOT as i32);
+    assert_eq!(err.raw_os_error().unwrap(),
+               winapi::CERT_E_UNTRUSTEDROOT as i32);
 }
 
 #[test]
@@ -120,7 +122,8 @@ fn wrong_host_cert() {
         .initialize(creds, stream)
         .err()
         .unwrap();
-    assert_eq!(err.raw_os_error().unwrap(), winapi::CERT_E_CN_NO_MATCH as i32);
+    assert_eq!(err.raw_os_error().unwrap(),
+               winapi::CERT_E_CN_NO_MATCH as i32);
 }
 
 #[test]
