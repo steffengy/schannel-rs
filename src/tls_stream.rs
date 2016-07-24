@@ -627,7 +627,7 @@ impl<S> Read for TlsStream<S>
         let nread = {
             let read_buf = try!(self.fill_buf());
             let nread = cmp::min(buf.len(), read_buf.len());
-            buf[..nread].clone_from_slice(&read_buf[..nread]);
+            buf[..nread].copy_from_slice(&read_buf[..nread]);
             nread
         };
         self.consume(nread);
