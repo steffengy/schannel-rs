@@ -3,5 +3,6 @@ schannel-rs [![Build status](https://ci.appveyor.com/api/projects/status/vefyaua
 
 [Documentation](http://steffengy.github.io/schannel-rs/doc/schannel/)
 
-Initial schannel implementation to allow https without openssl, more to come.
+Schannel bindings to allow https without openssl on windows, more to come.
+Currently this only supports the client-side.
 A simplified version of using the schannel API, can be found [here](http://www.codeproject.com/Articles/2642/SSL-TLS-client-server-for-NET-and-SSL-tunnelling)

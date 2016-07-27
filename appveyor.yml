@@ -22,7 +22,7 @@ test_script:
 after_deploy:
   - ps: Add-Content "$env:USERPROFILE\.git-credentials" "https://$($env:access_token):x-oauth-basic@github.com`n"
   - set deploy=1
-  - if not "%APPVEYOR_REPO_NAME%" == "steffengy/rust-schannel" ( set deploy=0 )
+  - if not "%APPVEYOR_REPO_NAME%" == "steffengy/schannel-rs" ( set deploy=0 )
   - if not "%APPVEYOR_REPO_BRANCH%" == "master" ( set deploy=0 )
   - if defined APPVEYOR_PULL_REQUEST_NUMBER ( set deploy=0 )
   - if not exist "target\doc" ( set deploy=0 )
