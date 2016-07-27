@@ -444,18 +444,20 @@ impl<S> TlsStream<S>
     }
 
     fn consume_enc_in(&mut self, nread: usize) {
-        unsafe {
-            let src = &self.enc_in.get_ref()[nread] as *const _;
-            let dst = self.enc_in.get_mut().as_mut_ptr();
+        let size = self.enc_in.position() as usize;
+        assert!(size >= nread);
+        let count = size - nread;
 
-            let size = self.enc_in.position() as usize;
-            assert!(size >= nread);
-            let count = size - nread;
-
-            ptr::copy(src, dst, count);
-
-            self.enc_in.set_position(count as u64);
+        if count > 0 {
+            unsafe {
+                let src = &self.enc_in.get_ref()[nread] as *const _;
+                let dst = self.enc_in.get_mut().as_mut_ptr();
+    
+                ptr::copy(src, dst, count);
+            }
         }
+
+        self.enc_in.set_position(count as u64);
     }
 
     fn decrypt(&mut self) -> io::Result<()> {
