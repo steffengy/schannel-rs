@@ -4,7 +4,6 @@
 
 extern crate crypt32;
 extern crate kernel32;
-extern crate libc;
 extern crate secur32;
 extern crate winapi;
 
@@ -25,7 +24,7 @@ mod security_context;
 #[cfg(test)]
 mod test;
 
-const INIT_REQUESTS: libc::c_ulong =
+const INIT_REQUESTS: winapi::c_ulong =
     winapi::ISC_REQ_CONFIDENTIALITY | winapi::ISC_REQ_INTEGRITY | winapi::ISC_REQ_REPLAY_DETECT |
     winapi::ISC_REQ_SEQUENCE_DETECT | winapi::ISC_REQ_MANUAL_CRED_VALIDATION |
     winapi::ISC_REQ_ALLOCATE_MEMORY | winapi::ISC_REQ_STREAM;

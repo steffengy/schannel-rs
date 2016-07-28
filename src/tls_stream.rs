@@ -1,7 +1,6 @@
 //! Schannel TLS streams.
 use crypt32;
 use secur32;
-use libc;
 use std::any::Any;
 use std::cmp;
 use std::error::Error;
@@ -185,7 +184,7 @@ impl<S> TlsStream<S>
                 unsafe {
                     let mut token = winapi::SCHANNEL_SHUTDOWN;
                     let mut buf = winapi::SecBuffer {
-                        cbBuffer: mem::size_of_val(&token) as libc::c_ulong,
+                        cbBuffer: mem::size_of_val(&token) as winapi::c_ulong,
                         BufferType: winapi::SECBUFFER_TOKEN,
                         pvBuffer: &mut token as *mut _ as *mut _,
                     };
@@ -220,7 +219,7 @@ impl<S> TlsStream<S>
                 .unwrap_or(ptr::null_mut());
 
             let inbufs = &mut [winapi::SecBuffer {
-                                   cbBuffer: self.enc_in.position() as libc::c_ulong,
+                                   cbBuffer: self.enc_in.position() as winapi::c_ulong,
                                    BufferType: winapi::SECBUFFER_TOKEN,
                                    pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
                                },
@@ -484,7 +483,7 @@ impl<S> TlsStream<S>
     fn decrypt(&mut self) -> io::Result<()> {
         unsafe {
             let bufs = &mut [winapi::SecBuffer {
-                                 cbBuffer: self.enc_in.position() as libc::c_ulong,
+                                 cbBuffer: self.enc_in.position() as winapi::c_ulong,
                                  BufferType: winapi::SECBUFFER_DATA,
                                  pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
                              },
@@ -580,7 +579,7 @@ impl<S> TlsStream<S>
                           pvBuffer: buf_start as *mut _,
                       },
                       winapi::SecBuffer {
-                          cbBuffer: buf.len() as libc::c_ulong,
+                          cbBuffer: buf.len() as winapi::c_ulong,
                           BufferType: winapi::SECBUFFER_DATA,
                           pvBuffer: buf_start.offset(sizes.cbHeader as isize) as *mut _,
                       },
