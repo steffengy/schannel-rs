@@ -1,9 +1,9 @@
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use winapi;
 
 use schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
-use tls_stream;
+use tls_stream::{self, HandshakeError};
 
 #[test]
 fn basic() {
@@ -47,6 +47,13 @@ fn valid_algorithms() {
     assert!(out.ends_with(b"</html>"));
 }
 
+fn unwrap_handshake<S>(e: HandshakeError<S>) -> io::Error {
+    match e {
+        HandshakeError::Failure(e) => e,
+        HandshakeError::Interrupted(_) => panic!("not an I/O error"),
+    }
+}
+
 #[test]
 #[ignore] // google's inconsistent about disallowing sslv3
 fn invalid_protocol() {
@@ -60,6 +67,7 @@ fn invalid_protocol() {
         .initialize(creds, stream)
         .err()
         .unwrap();
+    let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
                winapi::SEC_E_UNSUPPORTED_FUNCTION as i32);
 }
@@ -93,6 +101,7 @@ fn expired_cert() {
         .initialize(creds, stream)
         .err()
         .unwrap();
+    let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(), winapi::CERT_E_EXPIRED as i32);
 }
 
@@ -107,6 +116,7 @@ fn self_signed_cert() {
         .initialize(creds, stream)
         .err()
         .unwrap();
+    let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
                winapi::CERT_E_UNTRUSTEDROOT as i32);
 }
@@ -122,6 +132,7 @@ fn wrong_host_cert() {
         .initialize(creds, stream)
         .err()
         .unwrap();
+    let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
                winapi::CERT_E_CN_NO_MATCH as i32);
 }
@@ -144,13 +155,15 @@ fn validation_failure_is_permanent() {
     // temporarily switch to nonblocking to allow us to construct the stream
     // without validating
     stream.set_nonblocking(true).unwrap();
-    let mut stream = tls_stream::Builder::new()
+    let stream = tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
-        .initialize(creds, stream)
-        .unwrap();
+        .initialize(creds, stream);
+    let stream = match stream {
+        Err(HandshakeError::Interrupted(s)) => s,
+        _ => panic!(),
+    };
     stream.get_ref().set_nonblocking(false).unwrap();
-    assert_eq!(stream.write(b"hi").err().unwrap().raw_os_error().unwrap(),
-               winapi::CERT_E_UNTRUSTEDROOT as i32);
-    assert_eq!(stream.write(b"hi").err().unwrap().raw_os_error().unwrap(),
+    let err = unwrap_handshake(stream.handshake().err().unwrap());
+    assert_eq!(err.raw_os_error().unwrap(),
                winapi::CERT_E_UNTRUSTEDROOT as i32);
 }
