@@ -63,13 +63,19 @@ impl Builder {
     }
 
     /// Initializes a new TLS session.
-    pub fn initialize<S>(&self, mut cred: SchannelCred, stream: S) -> io::Result<TlsStream<S>>
+    pub fn initialize<S>(&self,
+                         mut cred: SchannelCred,
+                         stream: S)
+                         -> Result<TlsStream<S>, HandshakeError<S>>
         where S: Read + Write
     {
-        let (ctxt, buf) = try!(SecurityContext::initialize(&mut cred,
-                                                           self.domain.as_ref().map(|s| &s[..])));
+        let domain = self.domain.as_ref().map(|s| &s[..]);
+        let (ctxt, buf) = match SecurityContext::initialize(&mut cred, domain) {
+            Ok(pair) => pair,
+            Err(e) => return Err(HandshakeError::Failure(e)),
+        };
 
-        let mut stream = TlsStream {
+        let stream = TlsStream {
             cred: cred,
             context: ctxt,
             cert_store: self.cert_store.clone(),
@@ -86,13 +92,9 @@ impl Builder {
             out_buf: Cursor::new(buf.to_owned()),
         };
 
-        match stream.initialize() {
-            Ok(_) => {}
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e),
-        }
-
-        Ok(stream)
+        MidHandshakeTlsStream {
+            inner: stream,
+        }.handshake()
     }
 }
 
@@ -121,6 +123,23 @@ pub struct TlsStream<S> {
     enc_in: Cursor<Vec<u8>>,
     // valid from position() to len()
     out_buf: Cursor<Vec<u8>>,
+}
+
+/// A failure which can happen during the `Builder::initialize` phase, either an
+/// I/O error or an intermediate stream which has not completed its handshake.
+#[derive(Debug)]
+pub enum HandshakeError<S> {
+    /// A fatal I/O error occurred
+    Failure(io::Error),
+    /// The stream connection is in progress, but the handshake is not completed
+    /// yet.
+    Interrupted(MidHandshakeTlsStream<S>),
+}
+
+/// A stream which has not yet completed its handshake.
+#[derive(Debug)]
+pub struct MidHandshakeTlsStream<S> {
+    inner: TlsStream<S>,
 }
 
 impl<S> fmt::Debug for TlsStream<S>
@@ -593,6 +612,32 @@ impl<S> TlsStream<S>
         }
     }
 }
+
+impl<S> MidHandshakeTlsStream<S>
+    where S: Read + Write,
+{
+    /// Returns a shared reference to the inner stream.
+    pub fn get_ref(&self) -> &S {
+        self.inner.get_ref()
+    }
+
+    /// Returns a mutable reference to the inner stream.
+    pub fn get_mut(&mut self) -> &mut S {
+        self.inner.get_mut()
+    }
+
+    /// Restarts the handshake process.
+    pub fn handshake(mut self) -> Result<TlsStream<S>, HandshakeError<S>> {
+        match self.inner.initialize() {
+            Ok(_) => Ok(self.inner),
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                Err(HandshakeError::Interrupted(self))
+            }
+            Err(e) => Err(HandshakeError::Failure(e)),
+        }
+    }
+}
+
 
 impl<S> Write for TlsStream<S>
     where S: Read + Write
