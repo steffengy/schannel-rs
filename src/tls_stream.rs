@@ -8,6 +8,7 @@ use std::fmt;
 use std::io::{self, Read, BufRead, Write, Cursor};
 use std::mem;
 use std::ptr;
+use std::slice;
 use winapi;
 
 use {INIT_REQUESTS, Inner};
@@ -153,6 +154,27 @@ impl<S> fmt::Debug for TlsStream<S>
     }
 }
 
+unsafe fn secbuf(buftype: winapi::c_ulong,
+                 bytes: Option<&mut [u8]>) -> winapi::SecBuffer {
+    let (ptr, len) = match bytes {
+        Some(bytes) => (bytes.as_mut_ptr(), bytes.len() as winapi::c_ulong),
+        None => (ptr::null_mut(), 0),
+    };
+    winapi::SecBuffer {
+        BufferType: buftype,
+        cbBuffer: len,
+        pvBuffer: ptr as *mut winapi::c_void,
+    }
+}
+
+unsafe fn secbuf_desc(bufs: &mut [winapi::SecBuffer]) -> winapi::SecBufferDesc {
+    winapi::SecBufferDesc {
+        ulVersion: winapi::SECBUFFER_VERSION,
+        cBuffers: bufs.len() as winapi::c_ulong,
+        pBuffers: bufs.as_mut_ptr(),
+    }
+}
+
 impl<S> TlsStream<S>
     where S: Read + Write
 {
@@ -183,16 +205,12 @@ impl<S> TlsStream<S>
             _ => {
                 unsafe {
                     let mut token = winapi::SCHANNEL_SHUTDOWN;
-                    let mut buf = winapi::SecBuffer {
-                        cbBuffer: mem::size_of_val(&token) as winapi::c_ulong,
-                        BufferType: winapi::SECBUFFER_TOKEN,
-                        pvBuffer: &mut token as *mut _ as *mut _,
-                    };
-                    let mut desc = winapi::SecBufferDesc {
-                        ulVersion: winapi::SECBUFFER_VERSION,
-                        cBuffers: 1,
-                        pBuffers: &mut buf,
-                    };
+                    let ptr = &mut token as *mut _ as *mut u8;
+                    let size = mem::size_of_val(&token);
+                    let token = slice::from_raw_parts_mut(ptr, size);
+                    let mut buf = [secbuf(winapi::SECBUFFER_TOKEN, Some(token))];
+                    let mut desc = secbuf_desc(&mut buf);
+
                     match secur32::ApplyControlToken(self.context.get_mut(), &mut desc) {
                         winapi::SEC_E_OK => {}
                         err => return Err(io::Error::from_raw_os_error(err as i32)),
@@ -218,42 +236,16 @@ impl<S> TlsStream<S>
                 .map(|b| b.as_ptr() as *mut u16)
                 .unwrap_or(ptr::null_mut());
 
-            let inbufs = &mut [winapi::SecBuffer {
-                                   cbBuffer: self.enc_in.position() as winapi::c_ulong,
-                                   BufferType: winapi::SECBUFFER_TOKEN,
-                                   pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
-                               },
-                               winapi::SecBuffer {
-                                   cbBuffer: 0,
-                                   BufferType: winapi::SECBUFFER_EMPTY,
-                                   pvBuffer: ptr::null_mut(),
-                               }];
-            let mut inbuf_desc = winapi::SecBufferDesc {
-                ulVersion: winapi::SECBUFFER_VERSION,
-                cBuffers: 2,
-                pBuffers: inbufs.as_mut_ptr(),
-            };
+            let pos = self.enc_in.position() as usize;
+            let mut inbufs = [secbuf(winapi::SECBUFFER_TOKEN,
+                                     Some(&mut self.enc_in.get_mut()[..pos])),
+                              secbuf(winapi::SECBUFFER_EMPTY, None)];
+            let mut inbuf_desc = secbuf_desc(&mut inbufs);
 
-            let outbufs = &mut [winapi::SecBuffer {
-                                    cbBuffer: 0,
-                                    BufferType: winapi::SECBUFFER_TOKEN,
-                                    pvBuffer: ptr::null_mut(),
-                                },
-                                winapi::SecBuffer {
-                                    cbBuffer: 0,
-                                    BufferType: winapi::SECBUFFER_ALERT,
-                                    pvBuffer: ptr::null_mut(),
-                                },
-                                winapi::SecBuffer {
-                                    cbBuffer: 0,
-                                    BufferType: winapi::SECBUFFER_EMPTY,
-                                    pvBuffer: ptr::null_mut(),
-                                }];
-            let mut outbuf_desc = winapi::SecBufferDesc {
-                ulVersion: winapi::SECBUFFER_VERSION,
-                cBuffers: 3,
-                pBuffers: outbufs.as_mut_ptr(),
-            };
+            let mut outbufs = [secbuf(winapi::SECBUFFER_TOKEN, None),
+                               secbuf(winapi::SECBUFFER_ALERT, None),
+                               secbuf(winapi::SECBUFFER_EMPTY, None)];
+            let mut outbuf_desc = secbuf_desc(&mut outbufs);
 
             let mut attributes = 0;
 
@@ -482,31 +474,13 @@ impl<S> TlsStream<S>
 
     fn decrypt(&mut self) -> io::Result<()> {
         unsafe {
-            let bufs = &mut [winapi::SecBuffer {
-                                 cbBuffer: self.enc_in.position() as winapi::c_ulong,
-                                 BufferType: winapi::SECBUFFER_DATA,
-                                 pvBuffer: self.enc_in.get_mut().as_mut_ptr() as *mut _,
-                             },
-                             winapi::SecBuffer {
-                                 cbBuffer: 0,
-                                 BufferType: winapi::SECBUFFER_EMPTY,
-                                 pvBuffer: ptr::null_mut(),
-                             },
-                             winapi::SecBuffer {
-                                 cbBuffer: 0,
-                                 BufferType: winapi::SECBUFFER_EMPTY,
-                                 pvBuffer: ptr::null_mut(),
-                             },
-                             winapi::SecBuffer {
-                                 cbBuffer: 0,
-                                 BufferType: winapi::SECBUFFER_EMPTY,
-                                 pvBuffer: ptr::null_mut(),
-                             }];
-            let mut bufdesc = winapi::SecBufferDesc {
-                ulVersion: winapi::SECBUFFER_VERSION,
-                cBuffers: 4,
-                pBuffers: bufs.as_mut_ptr(),
-            };
+            let position = self.enc_in.position() as usize;
+            let mut bufs = [secbuf(winapi::SECBUFFER_DATA,
+                                   Some(&mut self.enc_in.get_mut()[..position])),
+                            secbuf(winapi::SECBUFFER_EMPTY, None),
+                            secbuf(winapi::SECBUFFER_EMPTY, None),
+                            secbuf(winapi::SECBUFFER_EMPTY, None)];
+            let mut bufdesc = secbuf_desc(&mut bufs);
 
             match secur32::DecryptMessage(self.context.get_mut(),
                                           &mut bufdesc,
@@ -568,38 +542,23 @@ impl<S> TlsStream<S>
 
             let message_start = sizes.cbHeader as usize;
             self.out_buf
-                    .get_mut()[message_start..message_start + buf.len()]
+                .get_mut()[message_start..message_start + buf.len()]
                 .clone_from_slice(buf);
 
-            let buf_start = self.out_buf.get_mut().as_mut_ptr();
-            let bufs =
-                &mut [winapi::SecBuffer {
-                          cbBuffer: sizes.cbHeader,
-                          BufferType: winapi::SECBUFFER_STREAM_HEADER,
-                          pvBuffer: buf_start as *mut _,
-                      },
-                      winapi::SecBuffer {
-                          cbBuffer: buf.len() as winapi::c_ulong,
-                          BufferType: winapi::SECBUFFER_DATA,
-                          pvBuffer: buf_start.offset(sizes.cbHeader as isize) as *mut _,
-                      },
-                      winapi::SecBuffer {
-                          cbBuffer: sizes.cbTrailer,
-                          BufferType: winapi::SECBUFFER_STREAM_TRAILER,
-                          pvBuffer:
-                              buf_start.offset(sizes.cbHeader as isize +
-                                      buf.len() as isize) as *mut _,
-                      },
-                      winapi::SecBuffer {
-                          cbBuffer: 0,
-                          BufferType: winapi::SECBUFFER_EMPTY,
-                          pvBuffer: ptr::null_mut(),
-                      }];
-            let mut bufdesc = winapi::SecBufferDesc {
-                ulVersion: winapi::SECBUFFER_VERSION,
-                cBuffers: 4,
-                pBuffers: bufs.as_mut_ptr(),
+            let mut bufs = {
+                let out_buf = self.out_buf.get_mut();
+                let size = sizes.cbHeader as usize;
+
+                let header = secbuf(winapi::SECBUFFER_STREAM_HEADER,
+                                    Some(&mut out_buf[..size]));
+                let data = secbuf(winapi::SECBUFFER_DATA,
+                                  Some(&mut out_buf[size..size + buf.len()]));
+                let trailer = secbuf(winapi::SECBUFFER_STREAM_TRAILER,
+                                     Some(&mut out_buf[size + buf.len()..]));
+                let empty = secbuf(winapi::SECBUFFER_EMPTY, None);
+                [header, data, trailer, empty]
             };
+            let mut bufdesc = secbuf_desc(&mut bufs);
 
             match secur32::EncryptMessage(self.context.get_mut(), 0, &mut bufdesc, 0) {
                 winapi::SEC_E_OK => {
