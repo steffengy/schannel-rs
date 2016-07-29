@@ -19,7 +19,7 @@ build_script:
   - echo build
 test_script:
   - cargo test
-after_deploy:
+deploy_script:
   - ps: Add-Content "$env:USERPROFILE\.git-credentials" "https://$($env:access_token):x-oauth-basic@github.com`n"
   - set deploy=1
   - if not "%APPVEYOR_REPO_NAME%" == "steffengy/schannel-rs" ( set deploy=0 )
