@@ -142,7 +142,9 @@ impl Builder {
     }
 
     /// Sets the algorithms supported for credentials created from this builder.
-    pub fn supported_algorithms(mut self, supported_algorithms: &[Algorithm]) -> Builder {
+    pub fn supported_algorithms(&mut self,
+                                supported_algorithms: &[Algorithm])
+                                -> &mut Builder {
         assert!(supported_algorithms.iter()
             .all(|a| {
                 match *a {
@@ -155,7 +157,9 @@ impl Builder {
     }
 
     /// Sets the protocols enabled for credentials created from this builder.
-    pub fn enabled_protocols(mut self, enabled_protocols: &[Protocol]) -> Builder {
+    pub fn enabled_protocols(&mut self,
+                             enabled_protocols: &[Protocol])
+                             -> &mut Builder {
         assert!(enabled_protocols.iter()
             .all(|a| {
                 match *a {
