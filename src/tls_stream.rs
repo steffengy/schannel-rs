@@ -461,12 +461,7 @@ impl<S> TlsStream<S>
         let count = size - nread;
 
         if count > 0 {
-            unsafe {
-                let src = &self.enc_in.get_ref()[nread] as *const _;
-                let dst = self.enc_in.get_mut().as_mut_ptr();
-
-                ptr::copy(src, dst, count);
-            }
+            self.enc_in.get_mut().drain(..nread);
         }
 
         self.enc_in.set_position(count as u64);
