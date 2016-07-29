@@ -6,6 +6,7 @@ use std::mem;
 use std::ptr;
 
 use Inner;
+use cert_context::CertContext;
 
 lazy_static! {
     static ref UNISP_NAME: Vec<u8> = winapi::UNISP_NAME.bytes().chain(Some(0)).collect();
@@ -133,6 +134,7 @@ impl Protocol {
 pub struct Builder {
     supported_algorithms: Option<Vec<Algorithm>>,
     enabled_protocols: Option<Vec<Protocol>>,
+    certs: Vec<CertContext>,
 }
 
 impl Builder {
@@ -167,10 +169,24 @@ impl Builder {
         self
     }
 
+    /// Add a certificate to get passed down when the credentials are acquired.
+    ///
+    /// Certificates passed here may specify a certificate that contains a
+    /// private key to be used in authenticating the application. Typically,
+    /// this is called once for each key exchange method supported by
+    /// servers.
+    ///
+    /// Clients often do not call this function and either depend on Schannel to
+    /// find an appropriate certificate or create a certificate later if needed.
+    pub fn cert(&mut self, cx: CertContext) -> &mut Builder {
+        self.certs.push(cx);
+        self
+    }
+
     /// Creates a new `SchannelCred`.
     pub fn acquire(&self, direction: Direction) -> io::Result<SchannelCred> {
         unsafe {
-            let mut handle = mem::uninitialized();
+            let mut handle = mem::zeroed();
             let mut cred_data: winapi::SCHANNEL_CRED = mem::zeroed();
             cred_data.dwVersion = winapi::SCHANNEL_CRED_VERSION;
             cred_data.dwFlags = winapi::SCH_USE_STRONG_CRYPTO;
@@ -183,6 +199,8 @@ impl Builder {
                     .map(|p| p.dword(direction))
                     .fold(0, |acc, p| acc | p);
             }
+            cred_data.cCreds = self.certs.len() as winapi::DWORD;
+            cred_data.paCred = self.certs.as_ptr() as *mut _;
 
             let direction = match direction {
                 Direction::Inbound => winapi::SECPKG_CRED_INBOUND,

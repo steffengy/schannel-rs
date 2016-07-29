@@ -1,3 +1,7 @@
+//! Bindings to Certificate Trust Lists (CTL) in winapi.
+
+#![allow(dead_code)]
+
 use crypt32;
 use std::io;
 use std::mem;
@@ -12,6 +16,8 @@ lazy_static! {
 		winapi::szOID_OIWSEC_sha1.bytes().chain(Some(0)).collect();
 }
 
+/// Wrapped `PCCTL_CONTEXT` which represents a certificate trust list to
+/// Windows.
 pub struct CtlContext(winapi::PCCTL_CONTEXT);
 
 unsafe impl Send for CtlContext {}
@@ -40,6 +46,7 @@ impl Inner<winapi::PCCTL_CONTEXT> for CtlContext {
 }
 
 impl CtlContext {
+    /// Returns a builder reader to create an encoded `CtlContext`.
     pub fn builder() -> Builder {
         Builder {
             certificates: vec![],
@@ -48,17 +55,22 @@ impl CtlContext {
     }
 }
 
+/// Used to build an encoded `CtlContext` which can be added to a `Memory` store
+/// to get back the actual `CtlContext`.
 pub struct Builder {
     certificates: Vec<CertContext>,
     usages: Vec<Vec<u8>>,
 }
 
 impl Builder {
+    /// Adds a certificate to be passed to `CryptMsgEncodeAndSignCTL` later on.
     pub fn certificate(&mut self, cert: CertContext) -> &mut Builder {
         self.certificates.push(cert);
         self
     }
 
+    /// Adds a usage string to be passed in the `SubjectUsage` field to
+    /// `CryptMsgEncodeAndSignCTL` later on.
     pub fn usage(&mut self, usage: &str) -> &mut Builder {
         let mut usage = usage.as_bytes().to_owned();
         usage.push(0);
@@ -66,6 +78,10 @@ impl Builder {
         self
     }
 
+    /// Calls `CryptMsgEncodeAndSignCTL` to encode this list of certificates
+    /// into a CTL.
+    ///
+    /// This can later be passed to `Memory::add_encoded_ctl`.
     pub fn encode_and_sign(&self) -> io::Result<Vec<u8>> {
         unsafe {
             let encoding = winapi::X509_ASN_ENCODING | winapi::PKCS_7_ASN_ENCODING;
@@ -113,7 +129,7 @@ impl Builder {
                                                         ptr::null_mut(),
                                                         &mut size);
             if res == winapi::FALSE {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error())
             }
 
             let mut encoded = vec![0; size as usize];
@@ -125,7 +141,7 @@ impl Builder {
                                                         encoded.as_mut_ptr() as *mut winapi::BYTE,
                                                         &mut size);
             if res == winapi::FALSE {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error())
             }
 
             Ok(encoded)
@@ -149,7 +165,7 @@ fn cert_entry(cert: &CertContext) -> io::Result<Vec<u8>> {
             return Err(io::Error::last_os_error());
         }
 
-        let mut entry = vec![0; size as usize];
+        let mut entry = vec![0u8; size as usize];
         let res = crypt32::CertCreateCTLEntryFromCertificateContextProperties(
 			cert.as_inner(),
 			0,
@@ -163,31 +179,5 @@ fn cert_entry(cert: &CertContext) -> io::Result<Vec<u8>> {
         } else {
             Ok(entry)
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::io::Read;
-    use std::fs::File;
-    use cert_store::CertStore;
-    use ctl_context::CtlContext;
-
-    #[test]
-    fn create_ctl() {
-        let mut file = File::open(concat!(env!("CARGO_MANIFEST_DIR"),
-                                          "/test/self-signed.badssl.com.cer"))
-            .unwrap();
-        let mut cert = vec![];
-        file.read_to_end(&mut cert).unwrap();
-
-        let mut store = CertStore::memory().unwrap();
-        let cert = store.add_encoded_certificate(&cert).unwrap();
-
-        CtlContext::builder()
-            .certificate(cert)
-            .usage("1.3.6.1.4.1.311.2.2.2")
-            .encode_and_sign()
-            .unwrap();
     }
 }
