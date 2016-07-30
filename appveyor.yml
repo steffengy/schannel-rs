@@ -18,7 +18,8 @@ build_script:
   - if "%TARGET%" == "x86_64-pc-windows-msvc" ( cargo doc --no-deps )
   - echo build
 test_script:
-  - cargo test
+  # TODO remove this loop when server 2016 lands on appveyor; related to https://github.com/steffengy/schannel-rs/issues/8
+  - ps: for($i=1; $i -le 3; $i++) { cmd /c "cargo test 2>&1"; if ($?) { break } }
 deploy_script:
   - ps: Add-Content "$env:USERPROFILE\.git-credentials" "https://$($env:access_token):x-oauth-basic@github.com`n"
   - set deploy=1
