@@ -139,7 +139,7 @@ impl Builder {
                 more_calls: true,
                 shutting_down: false,
             },
-            needs_read: true,
+            needs_read: 1,
             dec_in: Cursor::new(Vec::new()),
             enc_in: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.map(|b| b.to_owned()).unwrap_or(Vec::new())),
@@ -171,7 +171,7 @@ pub struct TlsStream<S> {
     state: State,
     accept: bool,
     accept_first: bool,
-    needs_read: bool,
+    needs_read: usize,
     // valid from position() to len()
     dec_in: Cursor<Vec<u8>>,
     // valid from 0 to position()
@@ -280,7 +280,7 @@ impl<S> TlsStream<S>
                     more_calls: true,
                     shutting_down: true,
                 };
-                self.needs_read = false;
+                self.needs_read = 0;
             }
         }
 
@@ -367,11 +367,15 @@ impl<S> TlsStream<S>
                     let to_write = ContextBuffer(outbufs[0]);
 
                     self.consume_enc_in(nread);
-                    self.needs_read = self.enc_in.position() == 0;
+                    self.needs_read = (self.enc_in.position() == 0) as usize;
                     self.out_buf.get_mut().extend_from_slice(&to_write);
                 }
                 winapi::SEC_E_INCOMPLETE_MESSAGE => {
-                    self.needs_read = true;
+                    self.needs_read = if inbufs[1].BufferType == winapi::SECBUFFER_MISSING {
+                        inbufs[1].cbBuffer as usize
+                    } else {
+                        1
+                    };
                 }
                 winapi::SEC_E_OK => {
                     let nread = if inbufs[1].BufferType == winapi::SECBUFFER_EXTRA {
@@ -386,7 +390,7 @@ impl<S> TlsStream<S>
                     };
 
                     self.consume_enc_in(nread);
-                    self.needs_read = self.enc_in.position() == 0;
+                    self.needs_read = (self.enc_in.position() == 0) as usize;
                     if let Some(to_write) = to_write {
                         self.out_buf.get_mut().extend_from_slice(&to_write);
                     }
@@ -434,7 +438,7 @@ impl<S> TlsStream<S>
                         continue;
                     }
 
-                    if self.needs_read {
+                    if self.needs_read > 0 {
                         if try!(self.read_in()) == 0 {
                             return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
                                                       "unexpected EOF during handshake"));
@@ -541,17 +545,27 @@ impl<S> TlsStream<S>
     }
 
     fn read_in(&mut self) -> io::Result<usize> {
-        let existing_len = self.enc_in.position() as usize;
-        let min_len = cmp::max(1024, 2 * existing_len);
-        if self.enc_in.get_ref().len() < min_len {
-            self.enc_in.get_mut().resize(min_len, 0);
+        let mut sum_nread = 0;
+
+        while self.needs_read > 0 {
+            let existing_len = self.enc_in.position() as usize;
+            let min_len = cmp::max(cmp::max(1024, 2 * existing_len), self.needs_read);
+            if self.enc_in.get_ref().len() < min_len {
+                self.enc_in.get_mut().resize(min_len, 0);
+            }
+            let nread = {
+                let buf = &mut self.enc_in.get_mut()[existing_len..];
+                try!(self.stream.read(buf))
+            };
+            self.enc_in.set_position((existing_len + nread) as u64);
+            self.needs_read = self.needs_read.saturating_sub(nread);
+            if nread == 0 {
+                break;
+            }
+            sum_nread += nread;
         }
-        let nread = {
-            let buf = &mut self.enc_in.get_mut()[existing_len..];
-            try!(self.stream.read(buf))
-        };
-        self.enc_in.set_position((existing_len + nread) as u64);
-        Ok(nread)
+
+        Ok(sum_nread)
     }
 
     fn consume_enc_in(&mut self, nread: usize) {
@@ -595,11 +609,15 @@ impl<S> TlsStream<S>
                         self.enc_in.position() as usize
                     };
                     self.consume_enc_in(nread);
-                    self.needs_read = self.enc_in.position() == 0;
+                    self.needs_read = (self.enc_in.position() == 0) as usize;
                     Ok(())
                 }
                 winapi::SEC_E_INCOMPLETE_MESSAGE => {
-                    self.needs_read = true;
+                    self.needs_read = if bufs[1].BufferType == winapi::SECBUFFER_MISSING {
+                        bufs[1].cbBuffer as usize
+                    } else {
+                        1
+                    };
                     Ok(())
                 }
                 winapi::SEC_I_CONTEXT_EXPIRED => {
@@ -618,7 +636,7 @@ impl<S> TlsStream<S>
                         self.enc_in.position() as usize
                     };
                     self.consume_enc_in(nread);
-                    self.needs_read = self.enc_in.position() == 0;
+                    self.needs_read = (self.enc_in.position() == 0) as usize;
                     Ok(())
                 }
                 e => {
@@ -750,11 +768,11 @@ impl<S> BufRead for TlsStream<S>
                 break;
             }
 
-            if self.needs_read {
+            if self.needs_read > 0 {
                 if try!(self.read_in()) == 0 {
                     break;
                 }
-                self.needs_read = false;
+                self.needs_read = 0;
             }
 
             try!(self.decrypt());
