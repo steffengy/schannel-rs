@@ -602,12 +602,14 @@ impl<S> TlsStream<S>
                     self.needs_read = true;
                     Ok(())
                 }
-                state @ winapi::SEC_I_CONTEXT_EXPIRED |
-                state @ winapi::SEC_I_RENEGOTIATE => {
+                winapi::SEC_I_CONTEXT_EXPIRED => {
+                    self.shutdown()
+                }
+                winapi::SEC_I_RENEGOTIATE => {
                     self.state = State::Initializing {
                         needs_flush: false,
                         more_calls: true,
-                        shutting_down: state == winapi::SEC_I_CONTEXT_EXPIRED,
+                        shutting_down: false,
                     };
 
                     let nread = if bufs[3].BufferType == winapi::SECBUFFER_EXTRA {
