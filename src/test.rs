@@ -182,6 +182,11 @@ fn validation_failure_is_permanent() {
 
 const FRIENDLY_NAME: &'static str = "schannel-rs localhost testing cert";
 
+lazy_static! {
+    static ref szOID_RSA_SHA256RSA: Vec<u8> =
+        winapi::szOID_RSA_SHA256RSA.bytes().chain(Some(0)).collect();
+}
+
 fn install_certificate() -> io::Result<CertContext> {
     unsafe {
         let mut provider = 0;
@@ -247,7 +252,7 @@ fn install_certificate() -> io::Result<CertContext> {
             dwKeySpec: winapi::AT_SIGNATURE,
         };
         let mut sig_algorithm = winapi::CRYPT_ALGORITHM_IDENTIFIER {
-            pszObjId: winapi::szOID_RSA_SHA256RSA.as_ptr() as *mut _,
+            pszObjId: szOID_RSA_SHA256RSA.as_ptr() as *mut _,
             Parameters: mem::zeroed(),
         };
         let mut expiration_date: winapi::SYSTEMTIME = mem::zeroed();
