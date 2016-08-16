@@ -203,7 +203,7 @@ impl Builder {
                     .map(|p| p.dword(direction))
                     .fold(0, |acc, p| acc | p);
             }
-            let mut certs = self.certs.iter().map(|c| c.as_ptr()).collect::<Vec<_>>();
+            let mut certs = self.certs.iter().map(|c| c.as_inner()).collect::<Vec<_>>();
             cred_data.cCreds = certs.len() as winapi::DWORD;
             cred_data.paCred = certs.as_mut_ptr();
 

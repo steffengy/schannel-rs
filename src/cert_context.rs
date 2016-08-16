@@ -117,11 +117,6 @@ impl CertContext {
         }
     }
 
-    /// Returns the raw pointer representing the certificate context.
-    pub fn as_ptr(&self) -> winapi::PCCERT_CONTEXT {
-        self.0
-    }
-
     fn get_bytes(&self, prop: winapi::DWORD) -> io::Result<Vec<u8>> {
         unsafe {
             let mut len = 0;
