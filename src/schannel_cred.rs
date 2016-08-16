@@ -203,8 +203,9 @@ impl Builder {
                     .map(|p| p.dword(direction))
                     .fold(0, |acc, p| acc | p);
             }
-            cred_data.cCreds = self.certs.len() as winapi::DWORD;
-            cred_data.paCred = self.certs.as_ptr() as *mut _;
+            let mut certs = self.certs.iter().map(|c| c.as_ptr()).collect::<Vec<_>>();
+            cred_data.cCreds = certs.len() as winapi::DWORD;
+            cred_data.paCred = certs.as_mut_ptr();
 
             let direction = match direction {
                 Direction::Inbound => winapi::SECPKG_CRED_INBOUND,
