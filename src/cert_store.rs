@@ -1,6 +1,7 @@
 //! Bindings to winapi's certificate-store related APIs.
 
 use crypt32;
+use std::cmp;
 use std::ffi::OsStr;
 use std::fmt;
 use std::io;
@@ -13,6 +14,10 @@ use cert_context::CertContext;
 use ctl_context::CtlContext;
 
 use Inner;
+
+// FIXME https://github.com/retep998/winapi-rs/pull/318
+const PKCS12_INCLUDE_EXTENDED_PROPERTIES: winapi::DWORD = 0x10;
+const PKCS12_NO_PERSIST_KEY: winapi::DWORD = 0x8000;
 
 /// Representation of certificate store on Windows, wrapping a `HCERTSTORE`.
 pub struct CertStore(winapi::HCERTSTORE);
@@ -263,6 +268,66 @@ impl<'a> Iterator for Certs<'a> {
     }
 }
 
+/// A builder type for imports of PKCS #12 archives.
+#[derive(Default)]
+pub struct PfxImportOptions {
+    password: Option<Vec<u16>>,
+    flags: winapi::DWORD,
+}
+
+impl PfxImportOptions {
+    /// Returns a new `PfxImportOptions` with default settings.
+    pub fn new() -> PfxImportOptions {
+        PfxImportOptions::default()
+    }
+
+    /// Sets the password to be used to decrypt the archive.
+    pub fn password(&mut self, password: &str) -> &mut PfxImportOptions {
+        self.password = Some(password.encode_utf16().chain(Some(0)).collect());
+        self
+    }
+
+    /// If set, the private key in the archive will not be persisted.
+    ///
+    /// If not set, private keys are persisted on disk and must be manually deleted.
+    pub fn no_persist_key(&mut self, no_persist_key: bool) -> &mut PfxImportOptions {
+        self.flag(PKCS12_NO_PERSIST_KEY, no_persist_key)
+    }
+
+    /// If set, all extended properties of the certificate will be imported.
+    pub fn include_extended_properties(&mut self,
+                                       include_extended_properties: bool)
+                                       -> &mut PfxImportOptions {
+        self.flag(PKCS12_INCLUDE_EXTENDED_PROPERTIES, include_extended_properties)
+    }
+
+    fn flag(&mut self, flag: winapi::DWORD, set: bool) -> &mut PfxImportOptions {
+        if set {
+            self.flags |= flag;
+        } else {
+            self.flags &= !flag;
+        }
+        self
+    }
+
+    /// Imports certificates from a PKCS #12 archive, returning a `CertStore` containing them.
+    pub fn import(&self, data: &[u8]) -> io::Result<CertStore> {
+        unsafe {
+            let mut blob = winapi::CRYPT_DATA_BLOB {
+                cbData: cmp::min(data.len(), winapi::DWORD::max_value() as usize) as winapi::DWORD,
+                pbData: data.as_ptr() as *const _ as *mut _,
+            };
+            let password = self.password.as_ref().map_or(ptr::null(), |p| p.as_ptr());
+
+            let store = crypt32::PFXImportCertStore(&mut blob, password, self.flags);
+            if store.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(CertStore(store))
+        }
+    }
+}
+
 /// An in-memory store of certificates and CTLs, created by `CertStore::memory`
 /// and can be converted into a `CertStore`.
 #[derive(Clone)]
@@ -343,5 +408,17 @@ mod test {
             .usage("1.3.6.1.4.1.311.2.2.2")
             .encode_and_sign()
             .unwrap();
+    }
+
+    #[test]
+    fn pfx_import() {
+        let pfx = include_bytes!("../test/identity.p12");
+        let mut store = PfxImportOptions::new()
+                        .no_persist_key(true)
+                        .include_extended_properties(true)
+                        .password("mypass")
+                        .import(pfx)
+                        .unwrap();
+        assert_eq!(store.certs().count(), 2);
     }
 }
