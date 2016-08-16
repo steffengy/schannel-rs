@@ -303,9 +303,9 @@ impl PfxImportOptions {
 
     fn flag(&mut self, flag: winapi::DWORD, set: bool) -> &mut PfxImportOptions {
         if set {
-        self.flags |= flag;
+            self.flags |= flag;
         } else {
-        self.flags &= !flag;
+            self.flags &= !flag;
         }
         self
     }
