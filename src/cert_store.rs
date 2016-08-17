@@ -414,11 +414,16 @@ mod test {
     fn pfx_import() {
         let pfx = include_bytes!("../test/identity.p12");
         let mut store = PfxImportOptions::new()
-                        .no_persist_key(true)
                         .include_extended_properties(true)
                         .password("mypass")
                         .import(pfx)
                         .unwrap();
         assert_eq!(store.certs().count(), 2);
+        let pkeys = store.certs()
+                         .filter(|c| {
+                             c.private_key().compare_key(true).silent(true).acquire().is_ok()
+                         })
+                         .count();
+        assert_eq!(pkeys, 1);
     }
 }

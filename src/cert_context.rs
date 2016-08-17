@@ -5,11 +5,16 @@ use std::io;
 use std::mem;
 use std::os::windows::prelude::*;
 use std::ptr;
-
 use crypt32;
 use winapi;
 
-use Inner;
+use {Inner, KeyHandlePriv};
+use key_handle::KeyHandle;
+
+// FIXME https://github.com/retep998/winapi-rs/pull/318
+const CRYPT_ACQUIRE_COMPARE_KEY_FLAG: winapi::DWORD = 0x4;
+const CRYPT_ACQUIRE_SILENT_FLAG: winapi::DWORD = 0x40;
+const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG: winapi::DWORD = 0x10000;
 
 /// Wrapper of a winapi certificate, or a `PCCERT_CONTEXT`.
 #[derive(Debug)]
@@ -104,6 +109,14 @@ impl CertContext {
         Ok(ret == 0)
     }
 
+    /// Returns a builder used to acquire the private key corresponding to this certificate.
+    pub fn private_key<'a>(&'a self) -> AcquirePrivateKeyOptions<'a> {
+        AcquirePrivateKeyOptions {
+            cert: self,
+            flags: 0,
+        }
+    }
+
     /// Deletes this certificate from its certificate store.
     pub fn delete(self) -> io::Result<()> {
         unsafe {
@@ -189,6 +202,56 @@ impl CertContext {
             } else {
                 Ok(())
             }
+        }
+    }
+}
+
+/// A builder type for certificate private key lookup.
+pub struct AcquirePrivateKeyOptions<'a> {
+    cert: &'a CertContext,
+    flags: winapi::DWORD,
+}
+
+impl<'a> AcquirePrivateKeyOptions<'a> {
+    /// If set, the certificate's public key will be compared with the private key to ensure a
+    /// match.
+    pub fn compare_key(&mut self, compare_key: bool) -> &mut AcquirePrivateKeyOptions<'a> {
+        self.flag(CRYPT_ACQUIRE_COMPARE_KEY_FLAG, compare_key)
+    }
+
+    /// If set, the lookup will not display any user interface, even if that causes the lookup to
+    /// fail.
+    pub fn silent(&mut self, silent: bool) -> &mut AcquirePrivateKeyOptions<'a> {
+        self.flag(CRYPT_ACQUIRE_SILENT_FLAG, silent)
+    }
+
+    fn flag(&mut self, flag: winapi::DWORD, set: bool) -> &mut AcquirePrivateKeyOptions<'a> {
+        if set {
+            self.flags |= flag;
+        } else {
+            self.flags &= !flag;
+        }
+        self
+    }
+
+    /// Acquires the private key handle.
+    pub fn acquire(&self) -> io::Result<KeyHandle> {
+        unsafe {
+            let flags = self.flags | CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG;
+            let mut handle = 0;
+            let mut spec = 0;
+            let mut free = winapi::FALSE;
+            let res = crypt32::CryptAcquireCertificatePrivateKey(self.cert.0,
+                                                                 flags,
+                                                                 ptr::null_mut(),
+                                                                 &mut handle,
+                                                                 &mut spec,
+                                                                 &mut free);
+            if res != winapi::TRUE {
+                return Err(io::Error::last_os_error());
+            }
+            assert!(free == winapi::TRUE);
+            Ok(KeyHandle::new(handle, spec))
         }
     }
 }
