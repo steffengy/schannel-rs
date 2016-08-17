@@ -206,16 +206,21 @@ impl CertContext {
     }
 }
 
+/// A builder type for certificate private key lookup.
 pub struct AcquirePrivateKeyOptions<'a> {
     cert: &'a CertContext,
     flags: winapi::DWORD,
 }
 
 impl<'a> AcquirePrivateKeyOptions<'a> {
+    /// If set, the certificate's public key will be compared with the private key to ensure a
+    /// match.
     pub fn compare_key(&mut self, compare_key: bool) -> &mut AcquirePrivateKeyOptions<'a> {
         self.flag(CRYPT_ACQUIRE_COMPARE_KEY_FLAG, compare_key)
     }
 
+    /// If set, the lookup will not display any user interface, even if that causes the lookup to
+    /// fail.
     pub fn silent(&mut self, silent: bool) -> &mut AcquirePrivateKeyOptions<'a> {
         self.flag(CRYPT_ACQUIRE_SILENT_FLAG, silent)
     }
@@ -229,6 +234,7 @@ impl<'a> AcquirePrivateKeyOptions<'a> {
         self
     }
 
+    /// Acquires the private key handle.
     pub fn acquire(&self) -> io::Result<KeyHandle> {
         unsafe {
             let flags = self.flags | CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG;
