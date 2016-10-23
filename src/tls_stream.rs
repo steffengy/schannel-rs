@@ -455,7 +455,7 @@ impl<S> TlsStream<S>
 
     fn validate(&mut self) -> io::Result<()> {
         // If we're accepting connections then we don't perform any validation
-        // fo the remote certificate, that's what they're doing!
+        // for the remote certificate, that's what they're doing!
         if self.accept {
             return Ok(())
         }
