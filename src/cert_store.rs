@@ -115,24 +115,6 @@ pub enum CertAdd {
 }
 
 impl CertStore {
-    /// Creates a new in-memory certificate store which certificates and CTLs
-    /// can be added to.
-    #[allow(dead_code)]
-    /* pub */ fn memory() -> io::Result<Memory> {
-        unsafe {
-            let store = crypt32::CertOpenStore(winapi::CERT_STORE_PROV_MEMORY as winapi::LPCSTR,
-                                               0,
-                                               0,
-                                               0,
-                                               ptr::null_mut());
-            if store.is_null() {
-                Err(io::Error::last_os_error())
-            } else {
-                Ok(Memory(CertStore(store)))
-            }
-        }
-    }
-
     /// Opens up the specified key store within the context of the current user.
     ///
     /// Known valid values for `which` are "Root" and "My".
@@ -234,6 +216,40 @@ impl CertStore {
             }
         }
     }
+
+    /// Exports this certificate store as a PKCS#12-encoded blob.
+    ///
+    /// The password specified will be the password used to unlock the returned
+    /// data.
+    pub fn export_pkcs12(&self, password: &str) -> io::Result<Vec<u8>> {
+        const EXPORT_PRIVATE_KEYS: winapi::DWORD = 0x4;
+
+        unsafe {
+            let password = password.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+            let mut blob = winapi::CRYPT_DATA_BLOB {
+                cbData: 0,
+                pbData: 0 as *mut _,
+            };
+            let res = crypt32::PFXExportCertStore(self.0,
+                                                  &mut blob,
+                                                  password.as_ptr(),
+                                                  EXPORT_PRIVATE_KEYS);
+            if res != winapi::TRUE {
+                return Err(io::Error::last_os_error())
+            }
+            let mut ret = Vec::with_capacity(blob.cbData as usize);
+            blob.pbData = ret.as_mut_ptr();
+            let res = crypt32::PFXExportCertStore(self.0,
+                                                  &mut blob,
+                                                  password.as_ptr(),
+                                                  EXPORT_PRIVATE_KEYS);
+            if res != winapi::TRUE {
+                return Err(io::Error::last_os_error())
+            }
+            ret.set_len(blob.cbData as usize);
+            Ok(ret)
+        }
+    }
 }
 
 /// An iterator over the certificates contained in a `CertStore`, returned by
@@ -328,13 +344,31 @@ impl PfxImportOptions {
     }
 }
 
-/// An in-memory store of certificates and CTLs, created by `CertStore::memory`
-/// and can be converted into a `CertStore`.
-#[derive(Clone)]
-/* pub */ struct Memory(CertStore);
+/// Representation of an in-memory certificate store.
+///
+/// Internally this contains a `CertStore` which this type can be converted to.
+pub struct Memory(CertStore);
 
-#[allow(dead_code)]
 impl Memory {
+    /// Creates a new in-memory certificate store which certificates and CTLs
+    /// can be added to.
+    ///
+    /// Initially the returned certificate store contains no certificates.
+    pub fn new() -> io::Result<Memory> {
+        unsafe {
+            let store = crypt32::CertOpenStore(winapi::CERT_STORE_PROV_MEMORY as winapi::LPCSTR,
+                                               0,
+                                               0,
+                                               0,
+                                               ptr::null_mut());
+            if store.is_null() {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(Memory(CertStore(store)))
+            }
+        }
+    }
+
     /// Adds a new certificate to this memory store.
     ///
     /// For example the bytes could be a DER-encoded certificate.
@@ -393,14 +427,14 @@ mod test {
     #[test]
     fn load() {
         let cert = include_bytes!("../test/cert.der");
-        let mut store = CertStore::memory().unwrap();
+        let mut store = Memory::new().unwrap();
         store.add_encoded_certificate(cert).unwrap();
     }
 
     #[test]
     fn create_ctl() {
         let cert = include_bytes!("../test/self-signed.badssl.com.cer");
-        let mut store = CertStore::memory().unwrap();
+        let mut store = Memory::new().unwrap();
         let cert = store.add_encoded_certificate(cert).unwrap();
 
         CtlContext::builder()
