@@ -12,6 +12,7 @@ use std::slice;
 use winapi;
 
 use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
+use cert_context::CertContext;
 use cert_store::CertStore;
 use security_context::SecurityContext;
 use context_buffer::ContextBuffer;
@@ -66,9 +67,8 @@ impl Builder {
     /// the certificate chain which the server's certificate is validated
     /// against.
     ///
-    /// Note that adding certificates here does **not** mean that they are
-    /// implicitly trusted. Instead certificates must sill be signed by some
-    /// local trusted authority.
+    /// Note that adding certificates here means that they are
+    /// implicitly trusted.
     pub fn cert_store(&mut self, cert_store: CertStore) -> &mut Builder {
         self.cert_store = Some(cert_store);
         self
@@ -501,6 +501,31 @@ impl<S> TlsStream<S>
         };
 
         unsafe {
+            // check if we trust the root-CA explicitly
+            let mut para_flags = winapi::CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS;
+            if let Some(ref mut store) = self.cert_store {
+                let cert_chain = *cert_chain.0;
+                if cert_chain.cChain > 0 {
+                    let first_rgp_chain = **cert_chain.rgpChain;
+                    if first_rgp_chain.cElement > 0 {
+                        let elements = slice::from_raw_parts(
+                            first_rgp_chain.rgpElement as *mut &mut winapi::CERT_CHAIN_ELEMENT,
+                            first_rgp_chain.cElement as usize);
+                        let final_element = elements.last().unwrap();
+                        
+                        let root_cert = CertContext::from_inner(final_element.pCertContext);
+                        // find the first cert that matches this root_cert
+                        let cert_match = store.certs()
+                             .map(|cert| cert == root_cert)
+                             .any(|found| found);
+                        mem::forget(root_cert);
+                        if cert_match {
+                            para_flags |= winapi::CERT_CHAIN_POLICY_ALLOW_UNKNOWN_CA_FLAG;
+                        }
+                    }
+                }
+            }
+
             let mut extra_para: winapi::SSL_EXTRA_CERT_CHAIN_POLICY_PARA = mem::zeroed();
             extra_para.cbSize = mem::size_of_val(&extra_para) as winapi::DWORD;
             extra_para.dwAuthType = winapi::AUTHTYPE_SERVER;
@@ -510,7 +535,7 @@ impl<S> TlsStream<S>
 
             let mut para: winapi::CERT_CHAIN_POLICY_PARA = mem::zeroed();
             para.cbSize = mem::size_of_val(&para) as winapi::DWORD;
-            para.dwFlags = winapi::CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS;
+            para.dwFlags = para_flags;
             para.pvExtraPolicyPara = &mut extra_para as *mut _ as *mut _;
 
             let mut status: winapi::CERT_CHAIN_POLICY_STATUS = mem::zeroed();

@@ -5,6 +5,7 @@ use std::io;
 use std::mem;
 use std::os::windows::prelude::*;
 use std::ptr;
+use std::slice;
 use crypt32;
 use winapi;
 
@@ -130,6 +131,13 @@ impl CertContext {
         }
     }
 
+    fn get_encoded_bytes(&self) -> &[u8] {
+        unsafe {
+            let cert_ctx = *self.0;
+            slice::from_raw_parts(cert_ctx.pbCertEncoded, cert_ctx.cbCertEncoded as usize)
+        }
+    }
+
     fn get_bytes(&self, prop: winapi::DWORD) -> io::Result<Vec<u8>> {
         unsafe {
             let mut len = 0;
@@ -203,6 +211,32 @@ impl CertContext {
                 Ok(())
             }
         }
+    }
+
+    fn get_sha256_hash(&self) -> io::Result<[u8; 32]> {
+        let mut hash = [0u8; 32];
+        let mut size = hash.len() as u32;
+        let ret = unsafe {
+            let cert_ctx = *self.0;
+            crypt32::CryptHashCertificate(
+                0, 
+                winapi::CALG_SHA_256,
+                0,
+                cert_ctx.pbCertEncoded,
+                cert_ctx.cbCertEncoded,
+                hash.as_mut_ptr(),
+                &mut size)
+        };
+        if ret != winapi::TRUE {
+            return Err(io::Error::last_os_error())
+        }
+        Ok(hash)
+    }
+}
+
+impl PartialEq for CertContext {
+    fn eq(&self, other: &CertContext) -> bool {
+        self.get_encoded_bytes() == other.get_encoded_bytes()
     }
 }
 
