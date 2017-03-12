@@ -13,7 +13,7 @@ use winapi;
 
 use Inner;
 use cert_context::CertContext;
-use cert_store::{CertStore, CertAdd};
+use cert_store::{CertStore, Memory, CertAdd};
 use schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
 use tls_stream::{self, HandshakeError};
 
@@ -131,6 +131,23 @@ fn self_signed_cert() {
     let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
                winapi::CERT_E_UNTRUSTEDROOT as i32);
+}
+
+#[test]
+fn self_signed_cert_manual_trust() {
+    let cert = include_bytes!("../test/self-signed.badssl.com.cer");
+    let mut store = Memory::new().unwrap();
+    store.add_encoded_certificate(cert).unwrap();
+
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
+    tls_stream::Builder::new()
+        .domain("self-signed.badssl.com")
+        .cert_store(store.into_store())
+        .connect(creds, stream)
+        .unwrap();
 }
 
 #[test]
