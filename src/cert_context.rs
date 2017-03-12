@@ -212,26 +212,6 @@ impl CertContext {
             }
         }
     }
-
-    fn get_sha256_hash(&self) -> io::Result<[u8; 32]> {
-        let mut hash = [0u8; 32];
-        let mut size = hash.len() as u32;
-        let ret = unsafe {
-            let cert_ctx = *self.0;
-            crypt32::CryptHashCertificate(
-                0, 
-                winapi::CALG_SHA_256,
-                0,
-                cert_ctx.pbCertEncoded,
-                cert_ctx.cbCertEncoded,
-                hash.as_mut_ptr(),
-                &mut size)
-        };
-        if ret != winapi::TRUE {
-            return Err(io::Error::last_os_error())
-        }
-        Ok(hash)
-    }
 }
 
 impl PartialEq for CertContext {
