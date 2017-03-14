@@ -17,6 +17,9 @@ const CRYPT_ACQUIRE_COMPARE_KEY_FLAG: winapi::DWORD = 0x4;
 const CRYPT_ACQUIRE_SILENT_FLAG: winapi::DWORD = 0x40;
 const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG: winapi::DWORD = 0x10000;
 
+// FIXME
+const CRYPT_STRING_BASE64HEADER: winapi::DWORD = 0x0;
+
 /// Wrapper of a winapi certificate, or a `PCCERT_CONTEXT`.
 #[derive(Debug)]
 pub struct CertContext(winapi::PCCERT_CONTEXT);
@@ -25,22 +28,51 @@ unsafe impl Sync for CertContext {}
 unsafe impl Send for CertContext {}
 
 impl CertContext {
-    /// Creates a new certificate from the encoded form.
-    ///
-    /// For example a DER-encoded certificate can be passed in to create a
-    /// `CertContext`.
+    /// Decodes a DER-formatted X509 certificate.
     pub fn new(data: &[u8]) -> io::Result<CertContext> {
         let ret = unsafe {
-            crypt32::CertCreateCertificateContext(
-                winapi::X509_ASN_ENCODING |
-                winapi::PKCS_7_ASN_ENCODING,
-                data.as_ptr(),
-                data.len() as winapi::DWORD)
+            crypt32::CertCreateCertificateContext(winapi::X509_ASN_ENCODING |
+                                                  winapi::PKCS_7_ASN_ENCODING,
+                                                  data.as_ptr(),
+                                                  data.len() as winapi::DWORD)
         };
         if ret.is_null() {
             Err(io::Error::last_os_error())
         } else {
             Ok(CertContext(ret))
+        }
+    }
+
+    /// Decodes a PEM-formatted X509 certificate.
+    pub fn from_pem(pem: &str) -> io::Result<CertContext> {
+        unsafe {
+            assert!(pem.len() <= winapi::DWORD::max_value() as usize);
+
+            let mut len = 0;
+            let ok = crypt32::CryptStringToBinaryA(pem.as_ptr() as winapi::LPCSTR,
+                                                   pem.len() as winapi::DWORD,
+                                                   CRYPT_STRING_BASE64HEADER,
+                                                   ptr::null_mut(),
+                                                   &mut len,
+                                                   ptr::null_mut(),
+                                                   ptr::null_mut());
+            if ok != winapi::TRUE {
+                return Err(io::Error::last_os_error());
+            }
+
+            let mut buf = vec![0; len as usize];
+            let ok = crypt32::CryptStringToBinaryA(pem.as_ptr() as winapi::LPCSTR,
+                                                   pem.len() as winapi::DWORD,
+                                                   CRYPT_STRING_BASE64HEADER,
+                                                   buf.as_mut_ptr(),
+                                                   &mut len,
+                                                   ptr::null_mut(),
+                                                   ptr::null_mut());
+            if ok != winapi::TRUE {
+                return Err(io::Error::last_os_error());
+            }
+
+            CertContext::new(&buf)
         }
     }
 
@@ -52,13 +84,13 @@ impl CertContext {
         unsafe {
             let mut buf = [0; 20];
             let mut len = buf.len() as winapi::DWORD;
-            let ret = crypt32::CertGetCertificateContextProperty(
-                        self.0,
-                        winapi::CERT_SHA1_HASH_PROP_ID,
-                        buf.as_mut_ptr() as *mut winapi::c_void,
-                        &mut len);
+            let ret = crypt32::CertGetCertificateContextProperty(self.0,
+                                                                 winapi::CERT_SHA1_HASH_PROP_ID,
+                                                                 buf.as_mut_ptr() as
+                                                                 *mut winapi::c_void,
+                                                                 &mut len);
             if ret != winapi::TRUE {
-                return Err(io::Error::last_os_error())
+                return Err(io::Error::last_os_error());
             }
             Ok(buf)
         }
@@ -104,9 +136,7 @@ impl CertContext {
     /// Verifies the time validity of this certificate relative to the system's
     /// current time.
     pub fn is_time_valid(&self) -> io::Result<bool> {
-        let ret = unsafe {
-            crypt32::CertVerifyTimeValidity(ptr::null_mut(), (*self.0).pCertInfo)
-        };
+        let ret = unsafe { crypt32::CertVerifyTimeValidity(ptr::null_mut(), (*self.0).pCertInfo) };
         Ok(ret == 0)
     }
 
@@ -141,23 +171,20 @@ impl CertContext {
     fn get_bytes(&self, prop: winapi::DWORD) -> io::Result<Vec<u8>> {
         unsafe {
             let mut len = 0;
-            let ret = crypt32::CertGetCertificateContextProperty(
-                        self.0,
-                        prop,
-                        ptr::null_mut(),
-                        &mut len);
+            let ret =
+                crypt32::CertGetCertificateContextProperty(self.0, prop, ptr::null_mut(), &mut len);
             if ret != winapi::TRUE {
-                return Err(io::Error::last_os_error())
+                return Err(io::Error::last_os_error());
             }
 
             let mut buf = vec![0u8; len as usize];
-            let ret = crypt32::CertGetCertificateContextProperty(
-                        self.0,
-                        prop,
-                        buf.as_mut_ptr() as *mut winapi::c_void,
-                        &mut len);
+            let ret = crypt32::CertGetCertificateContextProperty(self.0,
+                                                                 prop,
+                                                                 buf.as_mut_ptr() as
+                                                                 *mut winapi::c_void,
+                                                                 &mut len);
             if ret != winapi::TRUE {
-                return Err(io::Error::last_os_error())
+                return Err(io::Error::last_os_error());
             }
             Ok(buf)
         }
@@ -166,26 +193,23 @@ impl CertContext {
     fn get_string(&self, prop: winapi::DWORD) -> io::Result<String> {
         unsafe {
             let mut len = 0;
-            let ret = crypt32::CertGetCertificateContextProperty(
-                        self.0,
-                        prop,
-                        ptr::null_mut(),
-                        &mut len);
+            let ret =
+                crypt32::CertGetCertificateContextProperty(self.0, prop, ptr::null_mut(), &mut len);
             if ret != winapi::TRUE {
-                return Err(io::Error::last_os_error())
+                return Err(io::Error::last_os_error());
             }
 
             // Divide by 2 b/c `len` is the byte length, but we're allocating
             // u16 pairs which are 2 bytes each.
             let amt = (len / 2) as usize;
             let mut buf = vec![0u16; amt];
-            let ret = crypt32::CertGetCertificateContextProperty(
-                        self.0,
-                        prop,
-                        buf.as_mut_ptr() as *mut winapi::c_void,
-                        &mut len);
+            let ret = crypt32::CertGetCertificateContextProperty(self.0,
+                                                                 prop,
+                                                                 buf.as_mut_ptr() as
+                                                                 *mut winapi::c_void,
+                                                                 &mut len);
             if ret != winapi::TRUE {
-                return Err(io::Error::last_os_error())
+                return Err(io::Error::last_os_error());
             }
 
             // Chop off the trailing nul byte
@@ -200,11 +224,10 @@ impl CertContext {
                 cbData: (data.len() * 2) as winapi::DWORD,
                 pbData: data.as_ptr() as *mut _,
             };
-            let ret = crypt32::CertSetCertificateContextProperty(
-                        self.0,
-                        prop,
-                        0,
-                        &data as *const _ as *const _);
+            let ret = crypt32::CertSetCertificateContextProperty(self.0,
+                                                                 prop,
+                                                                 0,
+                                                                 &data as *const _ as *const _);
             if ret != winapi::TRUE {
                 Err(io::Error::last_os_error())
             } else {
@@ -272,9 +295,7 @@ impl<'a> AcquirePrivateKeyOptions<'a> {
 
 impl Clone for CertContext {
     fn clone(&self) -> CertContext {
-        unsafe {
-            CertContext(crypt32::CertDuplicateCertificateContext(self.0))
-        }
+        unsafe { CertContext(crypt32::CertDuplicateCertificateContext(self.0)) }
     }
 }
 
@@ -297,5 +318,20 @@ impl Inner<winapi::PCCERT_CONTEXT> for CertContext {
 
     fn get_mut(&mut self) -> &mut winapi::PCCERT_CONTEXT {
         &mut self.0
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn decode() {
+        let der = include_bytes!("../test/cert.der");
+        let pem = include_str!("../test/cert.pem");
+
+        let der = CertContext::new(der).unwrap();
+        let pem = CertContext::from_pem(pem).unwrap();
+        assert_eq!(der, pem);
     }
 }
