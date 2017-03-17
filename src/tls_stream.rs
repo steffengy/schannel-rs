@@ -512,7 +512,7 @@ impl<S> TlsStream<S>
                             first_rgp_chain.rgpElement as *mut &mut winapi::CERT_CHAIN_ELEMENT,
                             first_rgp_chain.cElement as usize);
                         let final_element = elements.last().unwrap();
-                        
+
                         let root_cert = CertContext::from_inner(final_element.pCertContext);
                         // find the first cert that matches this root_cert
                         let cert_match = store.certs()
@@ -605,7 +605,7 @@ impl<S> TlsStream<S>
         self.enc_in.set_position(count as u64);
     }
 
-    fn decrypt(&mut self) -> io::Result<()> {
+    fn decrypt(&mut self) -> io::Result<bool> {
         unsafe {
             let position = self.enc_in.position() as usize;
             let mut bufs = [secbuf(winapi::SECBUFFER_DATA,
@@ -635,7 +635,7 @@ impl<S> TlsStream<S>
                     };
                     self.consume_enc_in(nread);
                     self.needs_read = (self.enc_in.position() == 0) as usize;
-                    Ok(())
+                    Ok(false)
                 }
                 winapi::SEC_E_INCOMPLETE_MESSAGE => {
                     self.needs_read = if bufs[1].BufferType == winapi::SECBUFFER_MISSING {
@@ -643,11 +643,9 @@ impl<S> TlsStream<S>
                     } else {
                         1
                     };
-                    Ok(())
+                    Ok(false)
                 }
-                winapi::SEC_I_CONTEXT_EXPIRED => {
-                    self.shutdown()
-                }
+                winapi::SEC_I_CONTEXT_EXPIRED => Ok(true),
                 winapi::SEC_I_RENEGOTIATE => {
                     self.state = State::Initializing {
                         needs_flush: false,
@@ -662,11 +660,9 @@ impl<S> TlsStream<S>
                     };
                     self.consume_enc_in(nread);
                     self.needs_read = (self.enc_in.position() == 0) as usize;
-                    Ok(())
+                    Ok(false)
                 }
-                e => {
-                    return Err(io::Error::from_raw_os_error(e as i32))
-                }
+                e => Err(io::Error::from_raw_os_error(e as i32)),
             }
         }
     }
@@ -708,9 +704,7 @@ impl<S> TlsStream<S>
                     self.out_buf.set_position(0);
                     Ok(())
                 }
-                err => {
-                    return Err(io::Error::from_raw_os_error(err as i32))
-                }
+                err => Err(io::Error::from_raw_os_error(err as i32)),
             }
         }
     }
@@ -800,7 +794,10 @@ impl<S> BufRead for TlsStream<S>
                 self.needs_read = 0;
             }
 
-            try!(self.decrypt());
+            let eof = try!(self.decrypt());
+            if eof {
+                break;
+            }
         }
 
         Ok(self.get_buf())

@@ -416,6 +416,7 @@ fn accept_a_socket() {
         stream.write_all(&[1, 2, 3, 4]).unwrap();
         stream.flush().unwrap();
         assert_eq!(stream.read(&mut [0; 1024]).unwrap(), 4);
+        stream.shutdown().unwrap();
     });
 
     let stream = listener.accept().unwrap().0;
@@ -429,6 +430,9 @@ fn accept_a_socket() {
     assert_eq!(stream.read(&mut [0; 1024]).unwrap(), 4);
     stream.write_all(&[1, 2, 3, 4]).unwrap();
     stream.flush().unwrap();
+    let mut buf = [0; 1];
+    assert_eq!(stream.read(&mut buf).unwrap(), 0);
+
     t.join().unwrap();
 }
 
@@ -473,6 +477,7 @@ fn accept_one_byte_at_a_time() {
         stream.write_all(&[1, 2, 3, 4]).unwrap();
         stream.flush().unwrap();
         assert_eq!(stream.read(&mut [0; 1024]).unwrap(), 4);
+        stream.shutdown().unwrap();
     });
 
     let stream = listener.accept().unwrap().0;
@@ -486,5 +491,8 @@ fn accept_one_byte_at_a_time() {
     assert_eq!(stream.read(&mut [0; 1024]).unwrap(), 4);
     stream.write_all(&[1, 2, 3, 4]).unwrap();
     stream.flush().unwrap();
+    let mut buf = [0; 1];
+    assert_eq!(stream.read(&mut buf).unwrap(), 0);
+
     t.join().unwrap();
 }
