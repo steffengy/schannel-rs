@@ -36,7 +36,7 @@ const ACCEPT_REQUESTS: winapi::c_ulong =
 const INIT_REQUESTS: winapi::c_ulong =
     winapi::ISC_REQ_CONFIDENTIALITY | winapi::ISC_REQ_INTEGRITY | winapi::ISC_REQ_REPLAY_DETECT |
     winapi::ISC_REQ_SEQUENCE_DETECT | winapi::ISC_REQ_MANUAL_CRED_VALIDATION |
-    winapi::ISC_REQ_ALLOCATE_MEMORY | winapi::ISC_REQ_STREAM;
+    winapi::ISC_REQ_ALLOCATE_MEMORY | winapi::ISC_REQ_STREAM | winapi::ISC_REQ_USE_SUPPLIED_CREDS;
 
 trait Inner<T> {
     unsafe fn from_inner(t: T) -> Self;
