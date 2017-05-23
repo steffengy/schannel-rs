@@ -1,10 +1,10 @@
 [package]
 name = "schannel"
 license = "MIT"
-version = "0.1.4"
+version = "0.1.5"
 description = "Schannel bindings for rust, allowing SSL/TLS (e.g. https) without openssl"
 authors = [ "Steven Fackler <sfackler@gmail.com>", "Steffen Butzer <steffen.butzer@outlook.com>" ]
-documentation = "http://steffengy.github.io/schannel-rs/doc/schannel/"
+documentation = "https://docs.rs/schannel/0.1.5/schannel"
 repository = "https://github.com/steffengy/schannel-rs"
 readme = "README.md"
 keywords = ["windows", "schannel", "tls", "ssl", "https"]
