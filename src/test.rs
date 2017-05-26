@@ -206,8 +206,8 @@ fn verify_callback_success() {
     let mut stream = tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
         .verify_callback(|status, _| {
-            assert_eq!(status, false);
-            true
+            assert!(status.is_err());
+            Ok(())
         })
         .connect(creds, stream)
         .unwrap();
@@ -227,8 +227,8 @@ fn verify_callback_error() {
     let err = tls_stream::Builder::new()
         .domain("google.com")
         .verify_callback(|status, _| {
-            assert_eq!(status, true);
-            false
+            assert!(status.is_ok());
+            Err(io::Error::from_raw_os_error(winapi::CERT_E_UNTRUSTEDROOT))
         })
         .connect(creds, stream)
         .err()

@@ -32,7 +32,7 @@ lazy_static! {
 #[derive(Default)]
 pub struct Builder {
     domain: Option<Vec<u16>>,
-    verify_callback: Option<Arc<Fn(bool, &CertChain) -> bool>>,
+    verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
     cert_store: Option<CertStore>,
     accept: bool,
 }
@@ -57,7 +57,7 @@ impl Builder {
     /// The callback is provided with a boolean indicating if the (pre)validation was
     /// successful and with the certificate, which was validated.
     pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder 
-        where F: Fn(bool, &CertChain) -> bool + 'static
+        where F: Fn(io::Result<()>, &CertChain) -> io::Result<()> + 'static
     {
         self.verify_callback = Some(Arc::new(callback));
         self
@@ -173,7 +173,7 @@ pub struct TlsStream<S> {
     context: SecurityContext,
     cert_store: Option<CertStore>,
     domain: Option<Vec<u16>>,
-    verify_callback: Option<Arc<Fn(bool, &CertChain) -> bool>>,
+    verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
     stream: S,
     state: State,
     accept: bool,
@@ -556,20 +556,20 @@ impl<S> TlsStream<S>
                 return Err(io::Error::last_os_error())
             }
 
-            let mut verify_result = status.dwError == winapi::ERROR_SUCCESS;
+            let mut verify_result = if status.dwError != winapi::ERROR_SUCCESS {
+                Err(io::Error::from_raw_os_error(status.dwError as i32))
+            } else {
+                Ok(())
+            };
 
             // check if there's a user-specified verify callback
             if let Some(ref callback) = self.verify_callback {
                 if let Some(ref chain) = cert_chain.final_chain() {
                     verify_result = callback(verify_result, chain);
-                    // TODO: not sure if this is the best error
-                    status.dwError = winapi::CERT_E_UNTRUSTEDROOT as u32;
                 }
             }
 
-            if !verify_result {
-                return Err(io::Error::from_raw_os_error(status.dwError as i32))
-            }
+            try!(verify_result);
         }
 
         Ok(true)

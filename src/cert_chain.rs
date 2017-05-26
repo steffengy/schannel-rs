@@ -8,6 +8,7 @@ use winapi;
 use cert_context::CertContext;
 use Inner;
 
+/// A certificate chain context (consisting of multiple chains)
 pub struct CertChainContext(pub winapi::PCERT_CHAIN_CONTEXT);
 
 impl Clone for CertChainContext {
@@ -44,6 +45,7 @@ impl CertChainContext {
     }
 }
 
+/// A (simple) certificate chain 
 pub struct CertChain(winapi::PCERT_SIMPLE_CHAIN, CertChainContext);
 
 impl CertChain {
@@ -81,6 +83,7 @@ impl CertChain {
     }
 }
 
+/// An iterator that iterates over all certificates in a chain
 pub struct Certificates<'a> {
     chain: &'a CertChain,
     idx: usize,
