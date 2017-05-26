@@ -54,8 +54,10 @@ impl Builder {
 
     /// Set a verification callback to be used for connections created with this `Builder`.
     ///
-    /// The callback is provided with a boolean indicating if the (pre)validation was
-    /// successful and with the certificate, which was validated.
+    /// The callback is provided with an io::Result indicating if the (pre)validation was  
+    /// successful. The Ok() variant indicates a successful validation while the Err() variant  
+    /// contains the errorcode returned from the internal verification process.    
+    /// The validated certificate, is accessible through the second argument of the closure.
     pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder 
         where F: Fn(io::Result<()>, &CertChain) -> io::Result<()> + 'static
     {
