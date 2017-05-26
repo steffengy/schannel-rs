@@ -28,13 +28,29 @@ unsafe impl Sync for CertContext {}
 unsafe impl Send for CertContext {}
 
 /// A supported hashing algorithm
+pub struct HashAlgorithm(winapi::DWORD, usize);
+
 #[allow(missing_docs)]
-pub enum HashAlgorithm {
-    MD5,
-    SHA1,
-    SHA256,
-    SHA384,
-    SHA512,
+impl HashAlgorithm {
+    pub fn md5() -> HashAlgorithm {
+        HashAlgorithm(winapi::CALG_MD5, 16)
+    }
+
+    pub fn sha1() -> HashAlgorithm{
+        HashAlgorithm(winapi::CALG_SHA1, 20)
+    }
+
+    pub fn sha256() -> HashAlgorithm {
+        HashAlgorithm(winapi::CALG_SHA_256, 32)
+    }
+
+    pub fn sha384() -> HashAlgorithm {
+        HashAlgorithm(winapi::CALG_SHA_384, 48)
+    }
+
+    pub fn sha512() -> HashAlgorithm {
+        HashAlgorithm(winapi::CALG_SHA_512, 64)
+    }
 }
 
 impl CertContext {
@@ -89,18 +105,11 @@ impl CertContext {
     /// Returns a hash of this certificate
     pub fn fingerprint(&self, alg: HashAlgorithm) -> io::Result<Vec<u8>> {
         unsafe {
-            let (alg, len) = match alg {
-                HashAlgorithm::MD5 => (winapi::CALG_MD5, 16),
-                HashAlgorithm::SHA1 => (winapi::CALG_SHA1, 20),
-                HashAlgorithm::SHA256 => (winapi::CALG_SHA_256, 32),
-                HashAlgorithm::SHA384 => (winapi::CALG_SHA_384, 48),
-                HashAlgorithm::SHA512 => (winapi::CALG_SHA_512, 64),
-            };
-            let mut buf = vec![0u8; len];
+            let mut buf = vec![0u8; alg.1];
             let mut len = buf.len() as winapi::DWORD;
 
             let ret = crypt32::CryptHashCertificate(0,
-                                                    alg,
+                                                    alg.0,
                                                     0,
                                                     (*self.0).pbCertEncoded,
                                                     (*self.0).cbCertEncoded,
@@ -112,6 +121,17 @@ impl CertContext {
             }
             Ok(buf)
         }
+    }
+
+    /// Returns the sha1 hash of this certificate
+    ///
+    /// The sha1 is returned as a 20-byte array representing the bits of the
+    /// sha1 hash.
+    #[deprecated(note = "please use fingerprint instead")]
+    pub fn sha1(&self) -> io::Result<[u8; 20]> {
+        let mut out = [0u8; 20];
+        out.copy_from_slice(&try!(self.fingerprint(HashAlgorithm::sha1())));
+        Ok(out)
     }
 
     /// Returns the `<SIGNATURE>/<HASH>` string representing the certificate
@@ -361,19 +381,19 @@ mod test {
         let der = CertContext::new(der).unwrap();
         let pem = CertContext::from_pem(pem).unwrap();
 
-        let hash = der.fingerprint(HashAlgorithm::SHA1).unwrap();
+        let hash = der.fingerprint(HashAlgorithm::sha1()).unwrap();
         assert_eq!(hash, vec![‎
             0x5b, 0x77, 0x9a, 0xc3, 0x23, 0xdc, 0xc4, 0xff, 0xd8, 0xf1, 
             0x89, 0x5e, 0xea, 0x73, 0x96, 0x79, 0x84, 0xbd, 0xf6, 0x86
         ]);
-        assert_eq!(hash, pem.fingerprint(HashAlgorithm::SHA1).unwrap());
+        assert_eq!(hash, pem.fingerprint(HashAlgorithm::sha1()).unwrap());
         
-        let hash = der.fingerprint(HashAlgorithm::SHA256).unwrap();
+        let hash = der.fingerprint(HashAlgorithm::sha256()).unwrap();
         assert_eq!(hash, vec![
             0x9c, 0xf3, 0x6b, 0x55, 0x56, 0xde, 0x20, 0xd9, 0x69, 0xc0, 0xdd, 0x8f, 
             0xca, 0xda, 0xda, 0x9b, 0xb8, 0x51, 0x9, 0x9f, 0x86, 0x8f, 0x85, 0x5d, 
             0x90, 0x81, 0x73, 0xb5, 0x7a, 0xe0, 0x5a, 0xdd
         ]);
-        assert_eq!(hash, pem.fingerprint(HashAlgorithm::SHA256).unwrap());
+        assert_eq!(hash, pem.fingerprint(HashAlgorithm::sha256()).unwrap());
     }
 }
