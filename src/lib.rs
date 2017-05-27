@@ -16,6 +16,7 @@ use std::ptr;
 
 use key_handle::KeyHandle;
 
+pub mod cert_chain;
 pub mod cert_context;
 pub mod cert_store;
 /* pub */ mod ctl_context;

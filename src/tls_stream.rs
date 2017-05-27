@@ -9,10 +9,11 @@ use std::io::{self, Read, BufRead, Write, Cursor};
 use std::mem;
 use std::ptr;
 use std::slice;
+use std::sync::Arc;
 use winapi;
 
 use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
-use cert_context::CertContext;
+use cert_chain::{CertChain, CertChainContext};
 use cert_store::CertStore;
 use security_context::SecurityContext;
 use context_buffer::ContextBuffer;
@@ -27,20 +28,11 @@ lazy_static! {
         winapi::szOID_SGC_NETSCAPE.bytes().chain(Some(0)).collect();
 }
 
-struct CertChainContext(winapi::PCERT_CHAIN_CONTEXT);
-
-impl Drop for CertChainContext {
-    fn drop(&mut self) {
-        unsafe {
-            crypt32::CertFreeCertificateChain(self.0);
-        }
-    }
-}
-
 /// A builder type for `TlsStream`s.
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct Builder {
     domain: Option<Vec<u16>>,
+    verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
     cert_store: Option<CertStore>,
     accept: bool,
 }
@@ -57,6 +49,19 @@ impl Builder {
     /// certificate validation.
     pub fn domain(&mut self, domain: &str) -> &mut Builder {
         self.domain = Some(domain.encode_utf16().chain(Some(0)).collect());
+        self
+    }
+
+    /// Set a verification callback to be used for connections created with this `Builder`.
+    ///
+    /// The callback is provided with an io::Result indicating if the (pre)validation was  
+    /// successful. The Ok() variant indicates a successful validation while the Err() variant  
+    /// contains the errorcode returned from the internal verification process.    
+    /// The validated certificate, is accessible through the second argument of the closure.
+    pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder 
+        where F: Fn(io::Result<()>, &CertChain) -> io::Result<()> + 'static
+    {
+        self.verify_callback = Some(Arc::new(callback));
         self
     }
 
@@ -131,6 +136,7 @@ impl Builder {
             context: ctxt,
             cert_store: self.cert_store.clone(),
             domain: self.domain.clone(),
+            verify_callback: self.verify_callback.clone(),
             stream: stream,
             accept: accept,
             accept_first: true,
@@ -138,6 +144,7 @@ impl Builder {
                 needs_flush: false,
                 more_calls: true,
                 shutting_down: false,
+                validated: false,
             },
             needs_read: 1,
             dec_in: Cursor::new(Vec::new()),
@@ -156,6 +163,7 @@ enum State {
         needs_flush: bool,
         more_calls: bool,
         shutting_down: bool,
+        validated: bool,
     },
     Streaming { sizes: winapi::SecPkgContext_StreamSizes, },
     Shutdown,
@@ -167,6 +175,7 @@ pub struct TlsStream<S> {
     context: SecurityContext,
     cert_store: Option<CertStore>,
     domain: Option<Vec<u16>>,
+    verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
     stream: S,
     state: State,
     accept: bool,
@@ -279,6 +288,7 @@ impl<S> TlsStream<S>
                     needs_flush: false,
                     more_calls: true,
                     shutting_down: true,
+                    validated: false,
                 };
                 self.needs_read = 0;
             }
@@ -412,7 +422,7 @@ impl<S> TlsStream<S>
     fn initialize(&mut self) -> io::Result<Option<winapi::SecPkgContext_StreamSizes>> {
         loop {
             match self.state {
-                State::Initializing { mut needs_flush, more_calls, shutting_down } => {
+                State::Initializing { mut needs_flush, more_calls, shutting_down, validated } => {
                     if try!(self.write_out()) > 0 {
                         needs_flush = true;
                         if let State::Initializing { ref mut needs_flush, .. } = self.state {
@@ -427,14 +437,21 @@ impl<S> TlsStream<S>
                         }
                     }
 
+                    if !shutting_down && !validated {
+                        // on the last call, we require a valid certificate
+                        if try!(self.validate(!more_calls)) {
+                            if let State::Initializing { ref mut validated, .. } = self.state {
+                                *validated = true;
+                            }
+                        }
+                    }
+
                     if !more_calls {
                         self.state = if shutting_down {
                             State::Shutdown
                         } else {
-                            try!(self.validate());
                             State::Streaming { sizes: try!(self.context.stream_sizes()) }
                         };
-
                         continue;
                     }
 
@@ -453,14 +470,20 @@ impl<S> TlsStream<S>
         }
     }
 
-    fn validate(&mut self) -> io::Result<()> {
+    /// Returns true when the certificate was succesfully verified
+    /// Returns false, when a verification isn't necessary (yet)
+    /// Returns an error when the verification failed
+    fn validate(&mut self, require_cert: bool) -> io::Result<bool> {
         // If we're accepting connections then we don't perform any validation
         // for the remote certificate, that's what they're doing!
         if self.accept {
-            return Ok(())
+            return Ok(false);
         }
 
-        let cert_context = try!(self.context.remote_cert());
+        let cert_context = match self.context.remote_cert() {
+            Err(_) if !require_cert => return Ok(false),
+            ret => try!(ret)
+        };
 
         let cert_chain = unsafe {
             let cert_store = self.cert_store
@@ -504,24 +527,10 @@ impl<S> TlsStream<S>
             // check if we trust the root-CA explicitly
             let mut para_flags = winapi::CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS;
             if let Some(ref mut store) = self.cert_store {
-                let cert_chain = *cert_chain.0;
-                if cert_chain.cChain > 0 {
-                    let first_rgp_chain = **cert_chain.rgpChain;
-                    if first_rgp_chain.cElement > 0 {
-                        let elements = slice::from_raw_parts(
-                            first_rgp_chain.rgpElement as *mut &mut winapi::CERT_CHAIN_ELEMENT,
-                            first_rgp_chain.cElement as usize);
-                        let final_element = elements.last().unwrap();
-
-                        let root_cert = CertContext::from_inner(final_element.pCertContext);
-                        // find the first cert that matches this root_cert
-                        let cert_match = store.certs()
-                             .map(|cert| cert == root_cert)
-                             .any(|found| found);
-                        mem::forget(root_cert);
-                        if cert_match {
-                            para_flags |= winapi::CERT_CHAIN_POLICY_ALLOW_UNKNOWN_CA_FLAG;
-                        }
+                if let Some(chain) = cert_chain.final_chain() {
+                    // check if any cert of the chain is in the passed store (and therefore trusted)
+                    if chain.certificates().any(|cert| store.certs().any(|root_cert| root_cert == cert)) {
+                        para_flags |= winapi::CERT_CHAIN_POLICY_ALLOW_UNKNOWN_CA_FLAG;
                     }
                 }
             }
@@ -549,12 +558,23 @@ impl<S> TlsStream<S>
                 return Err(io::Error::last_os_error())
             }
 
-            if status.dwError != winapi::ERROR_SUCCESS {
-                return Err(io::Error::from_raw_os_error(status.dwError as i32))
+            let mut verify_result = if status.dwError != winapi::ERROR_SUCCESS {
+                Err(io::Error::from_raw_os_error(status.dwError as i32))
+            } else {
+                Ok(())
+            };
+
+            // check if there's a user-specified verify callback
+            if let Some(ref callback) = self.verify_callback {
+                if let Some(ref chain) = cert_chain.final_chain() {
+                    verify_result = callback(verify_result, chain);
+                }
             }
+
+            try!(verify_result);
         }
 
-        Ok(())
+        Ok(true)
     }
 
     fn write_out(&mut self) -> io::Result<usize> {
@@ -651,6 +671,7 @@ impl<S> TlsStream<S>
                         needs_flush: false,
                         more_calls: true,
                         shutting_down: false,
+                        validated: false,
                     };
 
                     let nread = if bufs[3].BufferType == winapi::SECBUFFER_EXTRA {

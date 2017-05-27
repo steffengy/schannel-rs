@@ -197,6 +197,47 @@ fn validation_failure_is_permanent() {
                winapi::CERT_E_UNTRUSTEDROOT as i32);
 }
 
+#[test]
+fn verify_callback_success() {
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
+    let mut stream = tls_stream::Builder::new()
+        .domain("self-signed.badssl.com")
+        .verify_callback(|status, _| {
+            assert!(status.is_err());
+            Ok(())
+        })
+        .connect(creds, stream)
+        .unwrap();
+    stream.write_all(b"GET / HTTP/1.0\r\nHost: self-signed.badssl.com\r\n\r\n").unwrap();
+    let mut out = vec![];
+    stream.read_to_end(&mut out).unwrap();
+    assert!(out.starts_with(b"HTTP/1.1 200 OK"));
+    assert!(out.ends_with(b"</html>\n"));
+}
+
+#[test]
+fn verify_callback_error() {
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("google.com:443").unwrap();
+    let err = tls_stream::Builder::new()
+        .domain("google.com")
+        .verify_callback(|status, _| {
+            assert!(status.is_ok());
+            Err(io::Error::from_raw_os_error(winapi::CERT_E_UNTRUSTEDROOT))
+        })
+        .connect(creds, stream)
+        .err()
+        .unwrap();
+    let err = unwrap_handshake(err);
+    assert_eq!(err.raw_os_error().unwrap(),
+               winapi::CERT_E_UNTRUSTEDROOT as i32);
+}
+
 const FRIENDLY_NAME: &'static str = "schannel-rs localhost testing cert";
 
 lazy_static! {
