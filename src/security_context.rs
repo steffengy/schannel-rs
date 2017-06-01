@@ -10,6 +10,7 @@ use context_buffer::ContextBuffer;
 
 use schannel_cred::SchannelCred;
 
+#[derive(Debug)]
 pub struct SecurityContext(winapi::CtxtHandle);
 
 impl Drop for SecurityContext {
@@ -38,7 +39,7 @@ impl SecurityContext {
     pub fn initialize(cred: &mut SchannelCred,
                       accept: bool,
                       domain: Option<&[u16]>)
-                      -> io::Result<(SecurityContext, Option<ContextBuffer>)> {
+                      -> Result<(SecurityContext, Option<ContextBuffer>),(io::Error, SecurityContext)> {
         unsafe {
             let mut ctxt = mem::zeroed();
 
@@ -71,7 +72,7 @@ impl SecurityContext {
                     Ok((SecurityContext(ctxt), Some(ContextBuffer(outbuf[0]))))
                 }
                 err => {
-                    Err(io::Error::from_raw_os_error(err as i32))
+                    Err((io::Error::from_raw_os_error(err as i32), SecurityContext(ctxt)))
                 }
             }
         }

@@ -12,7 +12,7 @@ use std::thread;
 use winapi;
 
 use Inner;
-use cert_context::CertContext;
+use cert_context::{CertContext, HashAlgorithm};
 use cert_store::{CertStore, Memory, CertAdd};
 use schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
 use tls_stream::{self, HandshakeError};
@@ -23,7 +23,7 @@ fn basic() {
     let stream = TcpStream::connect("google.com:443").unwrap();
     let mut stream = tls_stream::Builder::new()
         .domain("google.com")
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .unwrap();
     stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
     let mut out = vec![];
@@ -50,7 +50,7 @@ fn valid_algorithms() {
     let stream = TcpStream::connect("google.com:443").unwrap();
     let mut stream = tls_stream::Builder::new()
         .domain("google.com")
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .unwrap();
     stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
     let mut out = vec![];
@@ -62,6 +62,7 @@ fn valid_algorithms() {
 fn unwrap_handshake<S>(e: HandshakeError<S>) -> io::Error {
     match e {
         HandshakeError::Failure(e) => e,
+        HandshakeError::Failure2(e, ctx) => e,
         HandshakeError::Interrupted(_) => panic!("not an I/O error"),
     }
 }
@@ -76,7 +77,7 @@ fn invalid_protocol() {
     let stream = TcpStream::connect("google.com:443").unwrap();
     let err = tls_stream::Builder::new()
         .domain("google.com")
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
@@ -93,7 +94,7 @@ fn valid_protocol() {
     let stream = TcpStream::connect("google.com:443").unwrap();
     let mut stream = tls_stream::Builder::new()
         .domain("google.com")
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .unwrap();
     stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
     let mut out = vec![];
@@ -110,7 +111,7 @@ fn expired_cert() {
     let stream = TcpStream::connect("expired.badssl.com:443").unwrap();
     let err = tls_stream::Builder::new()
         .domain("expired.badssl.com")
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
@@ -125,7 +126,7 @@ fn self_signed_cert() {
     let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
     let err = tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
@@ -146,7 +147,7 @@ fn self_signed_cert_manual_trust() {
     tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
         .cert_store(store.into_store())
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .unwrap();
 }
 
@@ -158,7 +159,7 @@ fn wrong_host_cert() {
     let stream = TcpStream::connect("wrong.host.badssl.com:443").unwrap();
     let err = tls_stream::Builder::new()
         .domain("wrong.host.badssl.com")
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
@@ -172,7 +173,7 @@ fn shutdown() {
     let stream = TcpStream::connect("google.com:443").unwrap();
     let mut stream = tls_stream::Builder::new()
         .domain("google.com")
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .unwrap();
     stream.shutdown().unwrap();
 }
@@ -186,7 +187,7 @@ fn validation_failure_is_permanent() {
     stream.set_nonblocking(true).unwrap();
     let stream = tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
-        .connect(creds, stream);
+        .connect2(creds, stream);
     let stream = match stream {
         Err(HandshakeError::Interrupted(s)) => s,
         _ => panic!(),
@@ -195,6 +196,32 @@ fn validation_failure_is_permanent() {
     let err = unwrap_handshake(stream.handshake().err().unwrap());
     assert_eq!(err.raw_os_error().unwrap(),
                winapi::CERT_E_UNTRUSTEDROOT as i32);
+}
+
+#[test]
+fn validation_failure_returns_bad_cert() {
+    let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
+    let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
+    // temporarily switch to nonblocking to allow us to construct the stream
+    // without validating
+    stream.set_nonblocking(true).unwrap();
+    let stream = tls_stream::Builder::new()
+        .domain("self-signed.badssl.com")
+        .connect2(creds, stream);
+    let stream = match stream {
+        Err(HandshakeError::Interrupted(s)) => s,
+        _ => panic!(),
+    };
+    stream.get_ref().set_nonblocking(false).unwrap();
+    let expected_finger = vec!(100, 20, 80, 217, 74, 101, 250, 235, 59, 99, 16, 40, 216, 232, 108, 149, 67, 29, 184, 17);
+    match stream.handshake2().err().unwrap() {
+        HandshakeError::Failure2(e, mut ctx) => {
+            assert_eq!(e.raw_os_error().unwrap(),
+                       winapi::CERT_E_UNTRUSTEDROOT as i32);
+            assert_eq!(ctx.remote_cert().unwrap().fingerprint(HashAlgorithm::sha1()).unwrap(), expected_finger);
+        },
+        _ => panic!("did not return Failure2"),
+    }
 }
 
 #[test]
@@ -209,7 +236,7 @@ fn verify_callback_success() {
             assert!(status.is_err());
             Ok(())
         })
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .unwrap();
     stream.write_all(b"GET / HTTP/1.0\r\nHost: self-signed.badssl.com\r\n\r\n").unwrap();
     let mut out = vec![];
@@ -230,7 +257,7 @@ fn verify_callback_error() {
             assert!(status.is_ok());
             Err(io::Error::from_raw_os_error(winapi::CERT_E_UNTRUSTEDROOT))
         })
-        .connect(creds, stream)
+        .connect2(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
@@ -452,7 +479,7 @@ fn accept_a_socket() {
                                  .acquire(Direction::Outbound).unwrap();
         let mut stream = tls_stream::Builder::new()
             .domain("localhost")
-            .connect(creds, stream)
+            .connect2(creds, stream)
             .unwrap();
         stream.write_all(&[1, 2, 3, 4]).unwrap();
         stream.flush().unwrap();
@@ -513,7 +540,7 @@ fn accept_one_byte_at_a_time() {
                                  .acquire(Direction::Outbound).unwrap();
         let mut stream = tls_stream::Builder::new()
             .domain("localhost")
-            .connect(creds, OneByteAtATime { inner: stream })
+            .connect2(creds, OneByteAtATime { inner: stream })
             .unwrap();
         stream.write_all(&[1, 2, 3, 4]).unwrap();
         stream.flush().unwrap();
