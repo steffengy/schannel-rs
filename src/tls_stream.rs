@@ -79,14 +79,8 @@ impl Builder {
         self
     }
 
-    /// Initialize a new TLS session where the stream provided will be
-    /// connecting to a remote TLS server.
-    ///
-    /// If the stream provided is a blocking stream then the entire handshake
-    /// will be performed if possible, but if the stream is in nonblocking mode
-    /// then a `HandshakeError::Interrupted` variant may be returned. This
-    /// type can then be extracted to later call
-    /// `MidHandshakeTlsStream::handshake` when data becomes available.
+    ///DEPRECATED this connect will not return a HandshakeError::Failure2
+    #[deprecated(note = "please use connect2 instead")]
     pub fn connect<S>(&mut self,
                       cred: SchannelCred,
                       stream: S)
@@ -96,6 +90,23 @@ impl Builder {
         self.initialize(cred, false, stream)
     }
 
+    /// Initialize a new TLS session where the stream provided will be
+    /// connecting to a remote TLS server.
+    ///
+    /// If the stream provided is a blocking stream then the entire handshake
+    /// will be performed if possible, but if the stream is in nonblocking mode
+    /// then a `HandshakeError::Interrupted` variant may be returned. This
+    /// type can then be extracted to later call
+    /// `MidHandshakeTlsStream::handshake` when data becomes available.
+    pub fn connect2<S>(&mut self,
+                      cred: SchannelCred,
+                      stream: S)
+                      -> Result<TlsStream<S>, HandshakeError<S>>
+        where S: Read + Write
+    {
+        self.initialize2(cred, false, stream)
+    }
+    
     /// Initialize a new TLS session where the stream provided will be
     /// accepting a connection.
     ///
@@ -116,6 +127,8 @@ impl Builder {
         self.initialize(cred, true, stream)
     }
 
+    /// DEPRECATED this initialize function will not return a HandshakeError::Failure2
+    #[deprecated(note = "please use initialize2 instead")]
     fn initialize<S>(&mut self,
                      mut cred: SchannelCred,
                      accept: bool,
@@ -128,7 +141,48 @@ impl Builder {
                                                             accept,
                                                             domain) {
             Ok(pair) => pair,
-            Err(e) => return Err(HandshakeError::Failure(e)),
+            Err((e, ctx)) => return Err(HandshakeError::Failure(e)),
+        };
+
+        let stream = TlsStream {
+            cred: cred,
+            context: ctxt,
+            cert_store: self.cert_store.clone(),
+            domain: self.domain.clone(),
+            verify_callback: self.verify_callback.clone(),
+            stream: stream,
+            accept: accept,
+            accept_first: true,
+            state: State::Initializing {
+                needs_flush: false,
+                more_calls: true,
+                shutting_down: false,
+                validated: false,
+            },
+            needs_read: 1,
+            dec_in: Cursor::new(Vec::new()),
+            enc_in: Cursor::new(Vec::new()),
+            out_buf: Cursor::new(buf.map(|b| b.to_owned()).unwrap_or(Vec::new())),
+        };
+
+        MidHandshakeTlsStream {
+            inner: stream,
+        }.handshake()
+    }
+    
+    fn initialize2<S>(&mut self,
+                     mut cred: SchannelCred,
+                     accept: bool,
+                     stream: S)
+                         -> Result<TlsStream<S>, HandshakeError<S>>
+        where S: Read + Write
+    {
+        let domain = self.domain.as_ref().map(|s| &s[..]);
+        let (ctxt, buf) = match SecurityContext::initialize(&mut cred,
+                                                            accept,
+                                                            domain) {
+            Ok(pair) => pair,
+            Err((e, ctx)) => return Err(HandshakeError::Failure2(e, ctx)),
         };
 
         let stream = TlsStream {
@@ -195,6 +249,10 @@ pub struct TlsStream<S> {
 pub enum HandshakeError<S> {
     /// A fatal I/O error occurred
     Failure(io::Error),
+    
+    // Fatal I/O error, with security context.
+    Failure2(io::Error, SecurityContext),
+    
     /// The stream connection is in progress, but the handshake is not completed
     /// yet.
     Interrupted(MidHandshakeTlsStream<S>),
@@ -204,6 +262,7 @@ impl<S: fmt::Debug + Any> Error for HandshakeError<S> {
     fn description(&self) -> &str {
         match *self {
             HandshakeError::Failure(_) => "failed to perform handshake",
+            HandshakeError::Failure2(_, _) => "failed to perform handshake",
             HandshakeError::Interrupted(_) => "interrupted performing handshake",
         }
     }
@@ -211,6 +270,7 @@ impl<S: fmt::Debug + Any> Error for HandshakeError<S> {
     fn cause(&self) -> Option<&Error> {
         match *self {
             HandshakeError::Failure(ref e) => Some(e),
+            HandshakeError::Failure2(ref e, ref ctx) => Some(e),
             HandshakeError::Interrupted(_) => None,
         }
     }
@@ -744,7 +804,8 @@ impl<S> MidHandshakeTlsStream<S>
         self.inner.get_mut()
     }
 
-    /// Restarts the handshake process.
+    /// DEPRECATED does not return HandshakeError::Failure2
+    #[deprecated(note = "please use handshake2 instead")]
     pub fn handshake(mut self) -> Result<TlsStream<S>, HandshakeError<S>> {
         match self.inner.initialize() {
             Ok(_) => Ok(self.inner),
@@ -752,6 +813,17 @@ impl<S> MidHandshakeTlsStream<S>
                 Err(HandshakeError::Interrupted(self))
             }
             Err(e) => Err(HandshakeError::Failure(e)),
+        }
+    }
+    
+    // Restarts the handshake process.
+    pub fn handshake2(mut self) -> Result<TlsStream<S>, HandshakeError<S>> {
+        match self.inner.initialize() {
+            Ok(_) => Ok(self.inner),
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                Err(HandshakeError::Interrupted(self))
+            }
+            Err(e) => Err(HandshakeError::Failure2(e, self.inner.context)),
         }
     }
 }
