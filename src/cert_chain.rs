@@ -2,7 +2,6 @@
 
 use std::mem;
 use std::slice;
-use std::vec::Vec;
 use crypt32;
 use winapi;
 
@@ -42,20 +41,26 @@ impl CertChainContext {
     }
     
     pub fn get_chain(&self, index :usize) -> Option<CertChain> {
-        if let Some(chain) = self.chains().get(index) {
-            return Some(CertChain(chain.0, self.clone()));
-        }
-        None
-    }
-    
-    pub fn chains(&self) -> Vec<CertChain> {
-        let cert_chains = unsafe {
+        let cert_chain = unsafe {
             let cert_chain = *self.0;
-            slice::from_raw_parts(
-                cert_chain.rgpChain as *mut winapi::PCERT_SIMPLE_CHAIN,
-                cert_chain.cChain as usize)
+            if index >= cert_chain.cChain as usize {
+                None
+            } else {
+                let chain_slice = slice::from_raw_parts(
+                    cert_chain.rgpChain as *mut winapi::PCERT_SIMPLE_CHAIN,
+                    cert_chain.cChain as usize);
+                Some(CertChain(chain_slice[index], self.clone()))
+            }
         };
-        return cert_chains.iter().map(|chain| CertChain(*chain, self.clone())).collect();
+        return cert_chain;
+    }
+
+    /// Return an iterator over all certificate chains in this context
+    pub fn chains(&self) -> CertificateChains {
+        CertificateChains {
+            context: self,
+            idx: 0
+        }
     }
 }
 
@@ -94,6 +99,23 @@ impl CertChain {
             chain: self,
             idx: 0,
         }
+    }
+}
+
+
+/// An iterator that iterates over all chains in a context
+pub struct CertificateChains<'a> {
+    context: &'a CertChainContext,
+    idx: usize,
+}
+
+impl<'a> Iterator for CertificateChains<'a> {
+    type Item = CertChain;
+
+    fn next(&mut self) -> Option<CertChain> {
+        let idx = self.idx;
+        self.idx += 1;
+        self.context.get_chain(idx)
     }
 }
 

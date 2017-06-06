@@ -33,8 +33,7 @@ lazy_static! {
 #[derive(Default)]
 pub struct Builder {
     domain: Option<Vec<u16>>,
-    verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
-    verify_callback2: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
+    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
     cert_store: Option<CertStore>,
     accept: bool,
 }
@@ -60,24 +59,10 @@ impl Builder {
     /// successful. The Ok() variant indicates a successful validation while the Err() variant  
     /// contains the errorcode returned from the internal verification process.    
     /// The validated certificate, is accessible through the second argument of the closure.
-    #[deprecated(note = "please use verify_callback2 instead")]
     pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder 
-        where F: Fn(io::Result<()>, &CertChain) -> io::Result<()> + 'static
-    {
-        self.verify_callback = Some(Arc::new(callback));
-        self
-    }
-
-    /// Set a verification callback to be used for connections created with this `Builder`.
-    ///
-    /// The callback is provided with an io::Result indicating if the (pre)validation was  
-    /// successful. The Ok() variant indicates a successful validation while the Err() variant  
-    /// contains the errorcode returned from the internal verification process.    
-    /// The validated certificate, is accessible through the second argument of the closure.
-    pub fn verify_callback2<F>(&mut self, callback: F) -> &mut Builder 
         where F: Fn(CertValidationResult) -> io::Result<()> + 'static
     {
-        self.verify_callback2 = Some(Arc::new(callback));
+        self.verify_callback = Some(Arc::new(callback));
         self
     }
 
@@ -153,7 +138,6 @@ impl Builder {
             cert_store: self.cert_store.clone(),
             domain: self.domain.clone(),
             verify_callback: self.verify_callback.clone(),
-            verify_callback2: self.verify_callback2.clone(),
             stream: stream,
             accept: accept,
             accept_first: true,
@@ -192,8 +176,7 @@ pub struct TlsStream<S> {
     context: SecurityContext,
     cert_store: Option<CertStore>,
     domain: Option<Vec<u16>>,
-    verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
-    verify_callback2: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
+    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
     stream: S,
     state: State,
     accept: bool,
@@ -230,7 +213,7 @@ pub struct CertValidationResult {
 impl CertValidationResult {
 
     /// Returns the certificate that failed validation if applicable
-    pub fn get_failed_certificate(&self) -> Option<CertContext> {
+    pub fn failed_certificate(&self) -> Option<CertContext> {
         if let Some(cert_chain) = self.chain.get_chain(self.chain_index as usize) {
             return cert_chain.get(self.element_index as usize);
         }
@@ -242,7 +225,7 @@ impl CertValidationResult {
         self.chain.final_chain()
     }
     
-    pub fn get_result(&self) -> &io::Result<()> {
+    pub fn result(&self) -> &io::Result<()> {
         &self.res
     }
 }
@@ -613,10 +596,6 @@ impl<S> TlsStream<S>
 
             // check if there's a user-specified verify callback
             if let Some(ref callback) = self.verify_callback {
-                if let Some(ref chain) = cert_chain.final_chain() {
-                    verify_result = callback(verify_result, chain);
-                }
-            } else if let Some(ref callback) = self.verify_callback2 {
                 verify_result = callback(CertValidationResult{
                     chain: cert_chain,
                     res: verify_result,
