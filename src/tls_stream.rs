@@ -15,6 +15,7 @@ use winapi;
 use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
 use cert_chain::{CertChain, CertChainContext};
 use cert_store::CertStore;
+use cert_context::CertContext;
 use security_context::SecurityContext;
 use context_buffer::ContextBuffer;
 use schannel_cred::SchannelCred;
@@ -33,6 +34,7 @@ lazy_static! {
 pub struct Builder {
     domain: Option<Vec<u16>>,
     verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
+    verify_callback2: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
     cert_store: Option<CertStore>,
     accept: bool,
 }
@@ -58,10 +60,24 @@ impl Builder {
     /// successful. The Ok() variant indicates a successful validation while the Err() variant  
     /// contains the errorcode returned from the internal verification process.    
     /// The validated certificate, is accessible through the second argument of the closure.
+    #[deprecated(note = "please use verify_callback2 instead")]
     pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder 
         where F: Fn(io::Result<()>, &CertChain) -> io::Result<()> + 'static
     {
         self.verify_callback = Some(Arc::new(callback));
+        self
+    }
+
+    /// Set a verification callback to be used for connections created with this `Builder`.
+    ///
+    /// The callback is provided with an io::Result indicating if the (pre)validation was  
+    /// successful. The Ok() variant indicates a successful validation while the Err() variant  
+    /// contains the errorcode returned from the internal verification process.    
+    /// The validated certificate, is accessible through the second argument of the closure.
+    pub fn verify_callback2<F>(&mut self, callback: F) -> &mut Builder 
+        where F: Fn(CertValidationResult) -> io::Result<()> + 'static
+    {
+        self.verify_callback2 = Some(Arc::new(callback));
         self
     }
 
@@ -137,6 +153,7 @@ impl Builder {
             cert_store: self.cert_store.clone(),
             domain: self.domain.clone(),
             verify_callback: self.verify_callback.clone(),
+            verify_callback2: self.verify_callback2.clone(),
             stream: stream,
             accept: accept,
             accept_first: true,
@@ -176,6 +193,7 @@ pub struct TlsStream<S> {
     cert_store: Option<CertStore>,
     domain: Option<Vec<u16>>,
     verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
+    verify_callback2: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
     stream: S,
     state: State,
     accept: bool,
@@ -198,6 +216,35 @@ pub enum HandshakeError<S> {
     /// The stream connection is in progress, but the handshake is not completed
     /// yet.
     Interrupted(MidHandshakeTlsStream<S>),
+}
+
+/// A struct used to wrap various cert chain validation results for callback processing. 
+pub struct CertValidationResult {
+    chain :CertChainContext,
+    res :io::Result<()>,
+    chain_index :i32,
+    element_index :i32,
+    extra_policy_status :Option<winapi::CERT_CHAIN_POLICY_STATUS>,
+}
+
+impl CertValidationResult {
+
+    /// Returns the certificate that failed validation if applicable
+    pub fn get_failed_certificate(&self) -> Option<CertContext> {
+        if let Some(cert_chain) = self.chain.get_chain(self.chain_index as usize) {
+            return cert_chain.get(self.element_index as usize);
+        }
+        None
+    }
+    
+    // Returns the final certificate chain in the certificate context if applicable
+    pub fn chain(&self) -> Option<CertChain> {
+        self.chain.final_chain()
+    }
+    
+    pub fn get_result(&self) -> &io::Result<()> {
+        &self.res
+    }
 }
 
 impl<S: fmt::Debug + Any> Error for HandshakeError<S> {
@@ -569,11 +616,16 @@ impl<S> TlsStream<S>
                 if let Some(ref chain) = cert_chain.final_chain() {
                     verify_result = callback(verify_result, chain);
                 }
+            } else if let Some(ref callback) = self.verify_callback2 {
+                verify_result = callback(CertValidationResult{
+                    chain: cert_chain,
+                    res: verify_result,
+                    chain_index: status.lChainIndex,
+                    element_index: status.lElementIndex,
+                    extra_policy_status: None});
             }
-
             try!(verify_result);
         }
-
         Ok(true)
     }
 

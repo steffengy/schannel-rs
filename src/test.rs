@@ -12,7 +12,7 @@ use std::thread;
 use winapi;
 
 use Inner;
-use cert_context::CertContext;
+use cert_context::{CertContext, HashAlgorithm};
 use cert_store::{CertStore, Memory, CertAdd};
 use schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
 use tls_stream::{self, HandshakeError};
@@ -228,6 +228,68 @@ fn verify_callback_error() {
         .domain("google.com")
         .verify_callback(|status, _| {
             assert!(status.is_ok());
+            Err(io::Error::from_raw_os_error(winapi::CERT_E_UNTRUSTEDROOT))
+        })
+        .connect(creds, stream)
+        .err()
+        .unwrap();
+    let err = unwrap_handshake(err);
+    assert_eq!(err.raw_os_error().unwrap(),
+               winapi::CERT_E_UNTRUSTEDROOT as i32);
+}
+
+#[test]
+fn verify_callback2_success() {
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
+    let mut stream = tls_stream::Builder::new()
+        .domain("self-signed.badssl.com")
+        .verify_callback2(|validation_result| {
+            assert!(validation_result.get_result().is_err());
+            Ok(())
+        })
+        .connect(creds, stream)
+        .unwrap();
+    stream.write_all(b"GET / HTTP/1.0\r\nHost: self-signed.badssl.com\r\n\r\n").unwrap();
+    let mut out = vec![];
+    stream.read_to_end(&mut out).unwrap();
+    assert!(out.starts_with(b"HTTP/1.1 200 OK"));
+    assert!(out.ends_with(b"</html>\n"));
+}
+
+#[test]
+fn verify_callback2_error() {
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("google.com:443").unwrap();
+    let err = tls_stream::Builder::new()
+        .domain("google.com")
+        .verify_callback2(|validation_result| {
+            assert!(validation_result.get_result().is_ok());
+            Err(io::Error::from_raw_os_error(winapi::CERT_E_UNTRUSTEDROOT))
+        })
+        .connect(creds, stream)
+        .err()
+        .unwrap();
+    let err = unwrap_handshake(err);
+    assert_eq!(err.raw_os_error().unwrap(),
+               winapi::CERT_E_UNTRUSTEDROOT as i32);
+}
+
+#[test]
+fn verify_callback2_gives_failed_cert() {
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
+    let err = tls_stream::Builder::new()
+        .domain("self-signed.badssl.com")
+        .verify_callback2(|validation_result| {
+            let expected_finger = vec!(100, 20, 80, 217, 74, 101, 250, 235, 59, 99, 16, 40, 216, 232, 108, 149, 67, 29, 184, 17);
+            assert_eq!(validation_result.get_failed_certificate().unwrap().fingerprint(HashAlgorithm::sha1()).unwrap(), expected_finger);
             Err(io::Error::from_raw_os_error(winapi::CERT_E_UNTRUSTEDROOT))
         })
         .connect(creds, stream)

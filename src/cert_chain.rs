@@ -2,6 +2,7 @@
 
 use std::mem;
 use std::slice;
+use std::vec::Vec;
 use crypt32;
 use winapi;
 
@@ -34,14 +35,27 @@ impl CertChainContext {
     /// https://msdn.microsoft.com/de-de/library/windows/desktop/aa377182(v=vs.85).aspx
     /// rgpChain[cChain - 1] is the final chain
     pub fn final_chain(&self) -> Option<CertChain> {
-        let cloned = self.clone();
-        let chains = unsafe {
-            let cert_chain = *cloned.0;
+        if let Some(chain) = self.chains().last(){
+            return Some(CertChain(chain.0, self.clone()));
+        }
+        None
+    }
+    
+    pub fn get_chain(&self, index :usize) -> Option<CertChain> {
+        if let Some(chain) = self.chains().get(index) {
+            return Some(CertChain(chain.0, self.clone()));
+        }
+        None
+    }
+    
+    pub fn chains(&self) -> Vec<CertChain> {
+        let cert_chains = unsafe {
+            let cert_chain = *self.0;
             slice::from_raw_parts(
                 cert_chain.rgpChain as *mut winapi::PCERT_SIMPLE_CHAIN,
                 cert_chain.cChain as usize)
         };
-        chains.last().map(|chain| CertChain(*chain, cloned))
+        return cert_chains.iter().map(|chain| CertChain(*chain, self.clone())).collect();
     }
 }
 
