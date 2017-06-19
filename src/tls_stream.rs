@@ -207,7 +207,7 @@ pub struct CertValidationResult {
     res :io::Result<()>,
     chain_index :i32,
     element_index :i32,
-    extra_policy_status :Option<winapi::CERT_CHAIN_POLICY_STATUS>,
+    extra_policy_status : (winapi::LPCSTR, *const winapi::c_void),
 }
 
 impl CertValidationResult {
@@ -580,7 +580,8 @@ impl<S> TlsStream<S>
             let mut status: winapi::CERT_CHAIN_POLICY_STATUS = mem::zeroed();
             status.cbSize = mem::size_of_val(&status) as winapi::DWORD;
 
-            let res = crypt32::CertVerifyCertificateChainPolicy(winapi::CERT_CHAIN_POLICY_SSL as winapi::LPCSTR,
+            let verify_chain_policy_structure = winapi::CERT_CHAIN_POLICY_SSL as winapi::LPCSTR;
+            let res = crypt32::CertVerifyCertificateChainPolicy(verify_chain_policy_structure,
                                                                 cert_chain.0,
                                                                 &mut para,
                                                                 &mut status);
@@ -601,7 +602,7 @@ impl<S> TlsStream<S>
                     res: verify_result,
                     chain_index: status.lChainIndex,
                     element_index: status.lElementIndex,
-                    extra_policy_status: None});
+                    extra_policy_status: (verify_chain_policy_structure, status.pvExtraPolicyStatus)});
             }
             try!(verify_result);
         }
