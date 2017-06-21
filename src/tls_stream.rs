@@ -15,6 +15,7 @@ use winapi;
 use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
 use cert_chain::{CertChain, CertChainContext};
 use cert_store::CertStore;
+use cert_context::CertContext;
 use security_context::SecurityContext;
 use context_buffer::ContextBuffer;
 use schannel_cred::SchannelCred;
@@ -32,7 +33,7 @@ lazy_static! {
 #[derive(Default)]
 pub struct Builder {
     domain: Option<Vec<u16>>,
-    verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
+    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
     cert_store: Option<CertStore>,
     accept: bool,
 }
@@ -59,7 +60,7 @@ impl Builder {
     /// contains the errorcode returned from the internal verification process.    
     /// The validated certificate, is accessible through the second argument of the closure.
     pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder 
-        where F: Fn(io::Result<()>, &CertChain) -> io::Result<()> + 'static
+        where F: Fn(CertValidationResult) -> io::Result<()> + 'static
     {
         self.verify_callback = Some(Arc::new(callback));
         self
@@ -175,7 +176,7 @@ pub struct TlsStream<S> {
     context: SecurityContext,
     cert_store: Option<CertStore>,
     domain: Option<Vec<u16>>,
-    verify_callback: Option<Arc<Fn(io::Result<()>, &CertChain) -> io::Result<()>>>,
+    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
     stream: S,
     state: State,
     accept: bool,
@@ -198,6 +199,38 @@ pub enum HandshakeError<S> {
     /// The stream connection is in progress, but the handshake is not completed
     /// yet.
     Interrupted(MidHandshakeTlsStream<S>),
+}
+
+/// A struct used to wrap various cert chain validation results for callback processing. 
+pub struct CertValidationResult {
+    chain :CertChainContext,
+    res :i32,
+    chain_index :i32,
+    element_index :i32,
+}
+
+impl CertValidationResult {
+
+    /// Returns the certificate that failed validation if applicable
+    pub fn failed_certificate(&self) -> Option<CertContext> {
+        if let Some(cert_chain) = self.chain.get_chain(self.chain_index as usize) {
+            return cert_chain.get(self.element_index as usize);
+        }
+        None
+    }
+    
+    // Returns the final certificate chain in the certificate context if applicable
+    pub fn chain(&self) -> Option<CertChain> {
+        self.chain.final_chain()
+    }
+    
+    pub fn result(&self) -> io::Result<()> {
+        if self.res as u32 != winapi::ERROR_SUCCESS {
+                Err(io::Error::from_raw_os_error(self.res))
+        } else {
+                Ok(())
+        }
+    }
 }
 
 impl<S: fmt::Debug + Any> Error for HandshakeError<S> {
@@ -550,7 +583,8 @@ impl<S> TlsStream<S>
             let mut status: winapi::CERT_CHAIN_POLICY_STATUS = mem::zeroed();
             status.cbSize = mem::size_of_val(&status) as winapi::DWORD;
 
-            let res = crypt32::CertVerifyCertificateChainPolicy(winapi::CERT_CHAIN_POLICY_SSL as winapi::LPCSTR,
+            let verify_chain_policy_structure = winapi::CERT_CHAIN_POLICY_SSL as winapi::LPCSTR;
+            let res = crypt32::CertVerifyCertificateChainPolicy(verify_chain_policy_structure,
                                                                 cert_chain.0,
                                                                 &mut para,
                                                                 &mut status);
@@ -566,14 +600,14 @@ impl<S> TlsStream<S>
 
             // check if there's a user-specified verify callback
             if let Some(ref callback) = self.verify_callback {
-                if let Some(ref chain) = cert_chain.final_chain() {
-                    verify_result = callback(verify_result, chain);
-                }
+                verify_result = callback(CertValidationResult{
+                    chain: cert_chain,
+                    res: status.dwError as i32,
+                    chain_index: status.lChainIndex,
+                    element_index: status.lElementIndex});
             }
-
             try!(verify_result);
         }
-
         Ok(true)
     }
 

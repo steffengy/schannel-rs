@@ -34,14 +34,33 @@ impl CertChainContext {
     /// https://msdn.microsoft.com/de-de/library/windows/desktop/aa377182(v=vs.85).aspx
     /// rgpChain[cChain - 1] is the final chain
     pub fn final_chain(&self) -> Option<CertChain> {
-        let cloned = self.clone();
-        let chains = unsafe {
-            let cert_chain = *cloned.0;
-            slice::from_raw_parts(
-                cert_chain.rgpChain as *mut winapi::PCERT_SIMPLE_CHAIN,
-                cert_chain.cChain as usize)
+        if let Some(chain) = self.chains().last(){
+            return Some(CertChain(chain.0, self.clone()));
+        }
+        None
+    }
+    
+    pub fn get_chain(&self, index :usize) -> Option<CertChain> {
+        let cert_chain = unsafe {
+            let cert_chain = *self.0;
+            if index >= cert_chain.cChain as usize {
+                None
+            } else {
+                let chain_slice = slice::from_raw_parts(
+                    cert_chain.rgpChain as *mut winapi::PCERT_SIMPLE_CHAIN,
+                    cert_chain.cChain as usize);
+                Some(CertChain(chain_slice[index], self.clone()))
+            }
         };
-        chains.last().map(|chain| CertChain(*chain, cloned))
+        return cert_chain;
+    }
+
+    /// Return an iterator over all certificate chains in this context
+    pub fn chains(&self) -> CertificateChains {
+        CertificateChains {
+            context: self,
+            idx: 0
+        }
     }
 }
 
@@ -80,6 +99,23 @@ impl CertChain {
             chain: self,
             idx: 0,
         }
+    }
+}
+
+
+/// An iterator that iterates over all chains in a context
+pub struct CertificateChains<'a> {
+    context: &'a CertChainContext,
+    idx: usize,
+}
+
+impl<'a> Iterator for CertificateChains<'a> {
+    type Item = CertChain;
+
+    fn next(&mut self) -> Option<CertChain> {
+        let idx = self.idx;
+        self.idx += 1;
+        self.context.get_chain(idx)
     }
 }
 
