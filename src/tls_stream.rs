@@ -190,6 +190,12 @@ pub struct TlsStream<S> {
     out_buf: Cursor<Vec<u8>>,
 }
 
+/// ensures that a TlsStream is always Sync/Send
+fn _is_sync() {
+    fn sync<T: Sync + Send>() {}
+    sync::<TlsStream<()>>();
+}
+
 /// A failure which can happen during the `Builder::initialize` phase, either an
 /// I/O error or an intermediate stream which has not completed its handshake.
 #[derive(Debug)]
