@@ -204,10 +204,9 @@ pub enum HandshakeError<S> {
 /// A struct used to wrap various cert chain validation results for callback processing. 
 pub struct CertValidationResult {
     chain :CertChainContext,
-    res :io::Result<()>,
+    res :i32,
     chain_index :i32,
     element_index :i32,
-    extra_policy_status : (winapi::LPCSTR, *const winapi::c_void),
 }
 
 impl CertValidationResult {
@@ -225,8 +224,12 @@ impl CertValidationResult {
         self.chain.final_chain()
     }
     
-    pub fn result(&self) -> &io::Result<()> {
-        &self.res
+    pub fn result(&self) -> io::Result<()> {
+        if self.res as u32 != winapi::ERROR_SUCCESS {
+                Err(io::Error::from_raw_os_error(self.res))
+        } else {
+                Ok(())
+        }
     }
 }
 
@@ -599,10 +602,9 @@ impl<S> TlsStream<S>
             if let Some(ref callback) = self.verify_callback {
                 verify_result = callback(CertValidationResult{
                     chain: cert_chain,
-                    res: verify_result,
+                    res: status.dwError as i32,
                     chain_index: status.lChainIndex,
-                    element_index: status.lElementIndex,
-                    extra_policy_status: (verify_chain_policy_structure, status.pvExtraPolicyStatus)});
+                    element_index: status.lElementIndex});
             }
             try!(verify_result);
         }
