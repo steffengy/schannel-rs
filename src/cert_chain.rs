@@ -11,6 +11,9 @@ use Inner;
 /// A certificate chain context (consisting of multiple chains)
 pub struct CertChainContext(pub winapi::PCERT_CHAIN_CONTEXT);
 
+unsafe impl Sync for CertChainContext {}
+unsafe impl Send for CertChainContext {}
+
 impl Clone for CertChainContext {
     fn clone(&self) -> Self {
         let rced = unsafe {

@@ -33,7 +33,7 @@ lazy_static! {
 #[derive(Default)]
 pub struct Builder {
     domain: Option<Vec<u16>>,
-    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
+    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     cert_store: Option<CertStore>,
     accept: bool,
 }
@@ -60,7 +60,7 @@ impl Builder {
     /// contains the errorcode returned from the internal verification process.    
     /// The validated certificate, is accessible through the second argument of the closure.
     pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder 
-        where F: Fn(CertValidationResult) -> io::Result<()> + 'static
+        where F: Fn(CertValidationResult) -> io::Result<()> + 'static + Sync + Send
     {
         self.verify_callback = Some(Arc::new(callback));
         self
@@ -176,7 +176,7 @@ pub struct TlsStream<S> {
     context: SecurityContext,
     cert_store: Option<CertStore>,
     domain: Option<Vec<u16>>,
-    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()>>>,
+    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     stream: S,
     state: State,
     accept: bool,
@@ -188,6 +188,12 @@ pub struct TlsStream<S> {
     enc_in: Cursor<Vec<u8>>,
     // valid from position() to len()
     out_buf: Cursor<Vec<u8>>,
+}
+
+/// ensures that a TlsStream is always Sync/Send
+fn _is_sync() {
+    fn sync<T: Sync + Send>() {}
+    sync::<TlsStream<()>>();
 }
 
 /// A failure which can happen during the `Builder::initialize` phase, either an
