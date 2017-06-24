@@ -9,8 +9,9 @@ use std::slice;
 use crypt32;
 use winapi;
 
-use {Inner, KeyHandlePriv};
-use key_handle::KeyHandle;
+use Inner;
+use ncrypt_key::NcryptKey;
+use crypt_prov::{CryptProv, ProviderType};
 
 // FIXME https://github.com/retep998/winapi-rs/pull/318
 const CRYPT_ACQUIRE_COMPARE_KEY_FLAG: winapi::DWORD = 0x4;
@@ -19,13 +20,6 @@ const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG: winapi::DWORD = 0x10000;
 
 // FIXME
 const CRYPT_STRING_BASE64HEADER: winapi::DWORD = 0x0;
-
-/// Wrapper of a winapi certificate, or a `PCCERT_CONTEXT`.
-#[derive(Debug)]
-pub struct CertContext(winapi::PCCERT_CONTEXT);
-
-unsafe impl Sync for CertContext {}
-unsafe impl Send for CertContext {}
 
 /// A supported hashing algorithm
 pub struct HashAlgorithm(winapi::DWORD, usize);
@@ -52,6 +46,29 @@ impl HashAlgorithm {
         HashAlgorithm(winapi::CALG_SHA_512, 64)
     }
 }
+
+/// Wrapper of a winapi certificate, or a `PCCERT_CONTEXT`.
+#[derive(Debug)]
+pub struct CertContext(winapi::PCCERT_CONTEXT);
+
+unsafe impl Sync for CertContext {}
+unsafe impl Send for CertContext {}
+
+impl Drop for CertContext {
+    fn drop(&mut self) {
+        unsafe {
+            crypt32::CertFreeCertificateContext(self.0);
+        }
+    }
+}
+
+impl Clone for CertContext {
+    fn clone(&self) -> CertContext {
+        unsafe { CertContext(crypt32::CertDuplicateCertificateContext(self.0)) }
+    }
+}
+
+inner!(CertContext, winapi::PCCERT_CONTEXT);
 
 impl CertContext {
     /// Decodes a DER-formatted X509 certificate.
@@ -199,6 +216,18 @@ impl CertContext {
         }
     }
 
+    /// Returns a builder used to set the private key associated with this certificate.
+    pub fn set_key_prov_info<'a>(&'a self) -> SetKeyProvInfo<'a> {
+        SetKeyProvInfo {
+            cert: self,
+            container: None,
+            provider: None,
+            type_: 0,
+            flags: 0,
+            key_spec: 0,
+        }
+    }
+
     fn get_encoded_bytes(&self) -> &[u8] {
         unsafe {
             let cert_ctx = *self.0;
@@ -310,7 +339,7 @@ impl<'a> AcquirePrivateKeyOptions<'a> {
     }
 
     /// Acquires the private key handle.
-    pub fn acquire(&self) -> io::Result<KeyHandle> {
+    pub fn acquire(&self) -> io::Result<PrivateKey> {
         unsafe {
             let flags = self.flags | CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG;
             let mut handle = 0;
@@ -326,36 +355,136 @@ impl<'a> AcquirePrivateKeyOptions<'a> {
                 return Err(io::Error::last_os_error());
             }
             assert!(free == winapi::TRUE);
-            Ok(KeyHandle::new(handle, spec))
+            if spec & winapi::CERT_NCRYPT_KEY_SPEC != 0 {
+                Ok(PrivateKey::NcryptKey(NcryptKey::from_inner(handle)))
+            } else {
+                Ok(PrivateKey::CryptProv(CryptProv::from_inner(handle)))
+            }
         }
     }
 }
 
-impl Clone for CertContext {
-    fn clone(&self) -> CertContext {
-        unsafe { CertContext(crypt32::CertDuplicateCertificateContext(self.0)) }
-    }
+/// The private key associated with a certificate context.
+pub enum PrivateKey {
+    /// A CryptoAPI provider.
+    CryptProv(CryptProv),
+    /// A CNG provider.
+    NcryptKey(NcryptKey),
 }
 
-impl Drop for CertContext {
-    fn drop(&mut self) {
+/// A builder used to set the private key associated with a certificate.
+pub struct SetKeyProvInfo<'a> {
+    cert: &'a CertContext,
+    container: Option<Vec<u16>>,
+    provider: Option<Vec<u16>>,
+    type_: winapi::DWORD,
+    flags: winapi::DWORD,
+    key_spec: winapi::DWORD,
+}
+
+impl<'a> SetKeyProvInfo<'a> {
+    /// The name of the key container.
+    ///
+    /// If `type_` is not provided, this specifies the name of the key withing
+    /// the CNG key storage provider.
+    pub fn container(&mut self, container: &str) -> &mut SetKeyProvInfo<'a> {
+        self.container = Some(container.encode_utf16().chain(Some(0)).collect());
+        self
+    }
+
+    /// The name of the CSP.
+    ///
+    /// If `type_` is not provided, this contains the name of the CNG key
+    /// storage provider.
+    pub fn provider(&mut self, provider: &str) -> &mut SetKeyProvInfo<'a> {
+        self.provider = Some(provider.encode_utf16().chain(Some(0)).collect());
+        self
+    }
+
+    /// Sets the CSP type.
+    ///
+    /// If not provided, the key container is one of the CNG key storage
+    /// providers.
+    pub fn type_(&mut self, type_: ProviderType) -> &mut SetKeyProvInfo<'a> {
+        self.type_ = type_.as_raw();
+        self
+    }
+
+    /// If set, the handle to the key provider can be kept open for subsequent
+    /// calls to cryptographic functions.
+    pub fn keep_open(&mut self, keep_open: bool) -> &mut SetKeyProvInfo<'a> {
+        self.flag(winapi::CERT_SET_KEY_PROV_HANDLE_PROP_ID, keep_open)
+    }
+
+    /// If set, the key container contains machine keys.
+    pub fn machine_keyset(&mut self, machine_keyset: bool) -> &mut SetKeyProvInfo<'a> {
+        self.flag(winapi::CRYPT_MACHINE_KEYSET, machine_keyset)
+    }
+
+    /// If set, the key container will attempt to open keys without any user
+    /// interface prompts.
+    pub fn silent(&mut self, silent: bool) -> &mut SetKeyProvInfo<'a> {
+        self.flag(winapi::CRYPT_SILENT, silent)
+    }
+
+    fn flag(&mut self, flag: winapi::DWORD, on: bool) -> &mut SetKeyProvInfo<'a> {
+        if on {
+            self.flags |= flag;
+        } else {
+            self.flags &= !flag;
+        }
+        self
+    }
+
+    /// The specification of the private key to retrieve.
+    pub fn key_spec(&mut self, key_spec: KeySpec) -> &mut SetKeyProvInfo<'a> {
+        self.key_spec = key_spec.0;
+        self
+    }
+
+    /// Sets the private key for this certificate.
+    pub fn set(&mut self) -> io::Result<()> {
         unsafe {
-            crypt32::CertFreeCertificateContext(self.0);
+            let container = self.container.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null());
+            let provider = self.provider.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null());
+
+            let info = winapi::CRYPT_KEY_PROV_INFO {
+                pwszContainerName: container as *mut _,
+                pwszProvName: provider as *mut _,
+                dwProvType: self.type_,
+                dwFlags: self.flags,
+                cProvParam: 0,
+                rgProvParam: ptr::null_mut(),
+                dwKeySpec: self.key_spec,
+            };
+
+            let res =
+                crypt32::CertSetCertificateContextProperty(self.cert.0,
+                                                           winapi::CERT_KEY_PROV_INFO_PROP_ID,
+                                                           0,
+                                                           &info as *const _ as *const _);
+            if res == winapi::TRUE {
+                Ok(())
+            } else {
+                Err(io::Error::last_os_error())
+            }
         }
     }
 }
 
-impl Inner<winapi::PCCERT_CONTEXT> for CertContext {
-    unsafe fn from_inner(t: winapi::PCCERT_CONTEXT) -> CertContext {
-        CertContext(t)
+/// The specification of a private key.
+#[derive(Copy, Clone)]
+pub struct KeySpec(winapi::DWORD);
+
+impl KeySpec {
+    /// A key used to encrypt/decrypt session keys.
+    pub fn key_exchange() -> KeySpec {
+        KeySpec(winapi::AT_KEYEXCHANGE)
     }
 
-    fn as_inner(&self) -> winapi::PCCERT_CONTEXT {
-        self.0
-    }
-
-    fn get_mut(&mut self) -> &mut winapi::PCCERT_CONTEXT {
-        &mut self.0
+    /// A key used to create and verify digital signatures.
+    pub fn signature() -> KeySpec {
+        KeySpec(winapi::AT_SIGNATURE)
     }
 }
 
@@ -383,16 +512,17 @@ mod test {
 
         let hash = der.fingerprint(HashAlgorithm::sha1()).unwrap();
         assert_eq!(hash, vec![‎
-            0x5b, 0x77, 0x9a, 0xc3, 0x23, 0xdc, 0xc4, 0xff, 0xd8, 0xf1, 
-            0x89, 0x5e, 0xea, 0x73, 0x96, 0x79, 0x84, 0xbd, 0xf6, 0x86
+            0x59, 0x17, 0x2D, 0x93, 0x13, 0xE8, 0x44, 0x59, 0xBC, 0xFF,
+            0x27, 0xF9, 0x67, 0xE7, 0x9E, 0x6E, 0x92, 0x17, 0xE5, 0x84
         ]);
         assert_eq!(hash, pem.fingerprint(HashAlgorithm::sha1()).unwrap());
-        
+
         let hash = der.fingerprint(HashAlgorithm::sha256()).unwrap();
         assert_eq!(hash, vec![
-            0x9c, 0xf3, 0x6b, 0x55, 0x56, 0xde, 0x20, 0xd9, 0x69, 0xc0, 0xdd, 0x8f, 
-            0xca, 0xda, 0xda, 0x9b, 0xb8, 0x51, 0x9, 0x9f, 0x86, 0x8f, 0x85, 0x5d, 
-            0x90, 0x81, 0x73, 0xb5, 0x7a, 0xe0, 0x5a, 0xdd
+            0x47, 0x12, 0xB9, 0x39, 0xFB, 0xCB, 0x42, 0xA6, 0xB5, 0x10,
+            0x1B, 0x42, 0x13, 0x9A, 0x25, 0xB1, 0x4F, 0x81, 0xB4, 0x18,
+            0xFA, 0xCA, 0xBD, 0x37, 0x87, 0x46, 0xF1, 0x2F, 0x85, 0xCC,
+            0x65, 0x44
         ]);
         assert_eq!(hash, pem.fingerprint(HashAlgorithm::sha256()).unwrap());
     }

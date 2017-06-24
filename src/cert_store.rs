@@ -45,19 +45,7 @@ impl Clone for CertStore {
     }
 }
 
-impl Inner<winapi::HCERTSTORE> for CertStore {
-    unsafe fn from_inner(t: winapi::HCERTSTORE) -> CertStore {
-        CertStore(t)
-    }
-
-    fn as_inner(&self) -> winapi::HCERTSTORE {
-        self.0
-    }
-
-    fn get_mut(&mut self) -> &mut winapi::HCERTSTORE {
-        &mut self.0
-    }
-}
+inner!(CertStore, winapi::HCERTSTORE);
 
 /// Argument to the `add_cert` function indicating how a certificate should be
 /// added to a `CertStore`.

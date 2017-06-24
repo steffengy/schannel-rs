@@ -35,7 +35,6 @@ pub struct Builder {
     domain: Option<Vec<u16>>,
     verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     cert_store: Option<CertStore>,
-    accept: bool,
 }
 
 impl Builder {
@@ -55,11 +54,11 @@ impl Builder {
 
     /// Set a verification callback to be used for connections created with this `Builder`.
     ///
-    /// The callback is provided with an io::Result indicating if the (pre)validation was  
-    /// successful. The Ok() variant indicates a successful validation while the Err() variant  
-    /// contains the errorcode returned from the internal verification process.    
+    /// The callback is provided with an io::Result indicating if the (pre)validation was
+    /// successful. The Ok() variant indicates a successful validation while the Err() variant
+    /// contains the errorcode returned from the internal verification process.
     /// The validated certificate, is accessible through the second argument of the closure.
-    pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder 
+    pub fn verify_callback<F>(&mut self, callback: F) -> &mut Builder
         where F: Fn(CertValidationResult) -> io::Result<()> + 'static + Sync + Send
     {
         self.verify_callback = Some(Arc::new(callback));
@@ -207,16 +206,15 @@ pub enum HandshakeError<S> {
     Interrupted(MidHandshakeTlsStream<S>),
 }
 
-/// A struct used to wrap various cert chain validation results for callback processing. 
+/// A struct used to wrap various cert chain validation results for callback processing.
 pub struct CertValidationResult {
-    chain :CertChainContext,
-    res :i32,
-    chain_index :i32,
-    element_index :i32,
+    chain: CertChainContext,
+    res: i32,
+    chain_index: i32,
+    element_index: i32,
 }
 
 impl CertValidationResult {
-
     /// Returns the certificate that failed validation if applicable
     pub fn failed_certificate(&self) -> Option<CertContext> {
         if let Some(cert_chain) = self.chain.get_chain(self.chain_index as usize) {
@@ -224,12 +222,13 @@ impl CertValidationResult {
         }
         None
     }
-    
-    // Returns the final certificate chain in the certificate context if applicable
+
+    /// Returns the final certificate chain in the certificate context if applicable
     pub fn chain(&self) -> Option<CertChain> {
         self.chain.final_chain()
     }
-    
+
+    /// Returns the result of the built-in certificate verification process.
     pub fn result(&self) -> io::Result<()> {
         if self.res as u32 != winapi::ERROR_SUCCESS {
                 Err(io::Error::from_raw_os_error(self.res))

@@ -14,13 +14,32 @@ extern crate lazy_static;
 
 use std::ptr;
 
-use key_handle::KeyHandle;
+macro_rules! inner {
+    ($t:path, $raw:ty) => {
+        impl ::Inner<$raw> for $t {
+            unsafe fn from_inner(t: $raw) -> Self {
+                $t(t)
+            }
+
+            fn as_inner(&self) -> $raw {
+                self.0
+            }
+
+            fn get_mut(&mut self) -> &mut $raw {
+                &mut self.0
+            }
+        }
+    }
+}
 
 pub mod cert_chain;
 pub mod cert_context;
 pub mod cert_store;
+pub mod crypt_key;
+pub mod crypt_prov;
 /* pub */ mod ctl_context;
 pub mod key_handle;
+pub mod ncrypt_key;
 pub mod schannel_cred;
 pub mod tls_stream;
 
@@ -46,10 +65,6 @@ trait Inner<T> {
     fn as_inner(&self) -> T;
 
     fn get_mut(&mut self) -> &mut T;
-}
-
-trait KeyHandlePriv {
-    fn new(handle: winapi::HCRYPTPROV_OR_NCRYPT_KEY_HANDLE, spec: winapi::DWORD) -> KeyHandle;
 }
 
 unsafe fn secbuf(buftype: winapi::c_ulong,

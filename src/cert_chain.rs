@@ -42,7 +42,8 @@ impl CertChainContext {
         }
         None
     }
-    
+
+    /// Retrieves the specified chain from the context.
     pub fn get_chain(&self, index :usize) -> Option<CertChain> {
         let cert_chain = unsafe {
             let cert_chain = *self.0;
@@ -67,7 +68,7 @@ impl CertChainContext {
     }
 }
 
-/// A (simple) certificate chain 
+/// A (simple) certificate chain
 pub struct CertChain(winapi::PCERT_SIMPLE_CHAIN, CertChainContext);
 
 impl CertChain {
