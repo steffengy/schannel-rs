@@ -619,9 +619,8 @@ impl<S> TlsStream<S>
     fn write_out(&mut self) -> io::Result<usize> {
         let mut nwritten = 0;
 		let position = self.out_buf.position() as usize;
-		nwritten += try!(self.stream.write(&self.out_buf.get_ref()[position..]));
+		nwritten += self.stream.write(&self.out_buf.get_ref()[position..])?;
 		self.out_buf.set_position((position + nwritten) as u64);
-
         Ok(nwritten)
 	}
 
@@ -799,8 +798,9 @@ impl<S> Write for TlsStream<S>
 		
 		// We can only write if the write buffer is emptied first
 		self.write_out()?;
+        // Check if write_out managed to write the whole buffer or if some bytes are remaining
 		if self.out_buf.position() as usize != self.out_buf.get_ref().len() {
-			return Err(io::Error::new(io::ErrorKind::WouldBlock, "write buffer not empty"))
+			return Err(io::Error::new(io::ErrorKind::WouldBlock, "write buffer was not empty"))
 		}
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
@@ -812,10 +812,11 @@ impl<S> Write for TlsStream<S>
     }
 
     fn flush(&mut self) -> io::Result<()> {
-		// Make sure pending writes are done
+		// Make sure the write buffer is emptied
 		self.write_out()?;
+        // Check if write_out managed to write the whole buffer or if some bytes are remaining
 		if self.out_buf.position() as usize != self.out_buf.get_ref().len() {
-			return Err(io::Error::new(io::ErrorKind::WouldBlock, "write buffer not empty"))
+			return Err(io::Error::new(io::ErrorKind::WouldBlock, "write was buffer not empty"))
 		}
         self.stream.flush()
     }
