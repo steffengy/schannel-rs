@@ -617,11 +617,15 @@ impl<S> TlsStream<S>
     }
 
     fn write_out(&mut self) -> io::Result<usize> {
-        let mut nwritten = 0;
-		let position = self.out_buf.position() as usize;
-		nwritten += self.stream.write(&self.out_buf.get_ref()[position..])?;
-		self.out_buf.set_position((position + nwritten) as u64);
-        Ok(nwritten)
+        let mut out = 0;
+        while self.out_buf.position() as usize != self.out_buf.get_ref().len() {
+            let position = self.out_buf.position() as usize;
+            let nwritten = try!(self.stream.write(&self.out_buf.get_ref()[position..]));
+            out += nwritten;
+            self.out_buf.set_position((position + nwritten) as u64);
+        }
+
+        Ok(out)
 	}
 
     fn read_in(&mut self) -> io::Result<usize> {
@@ -798,26 +802,27 @@ impl<S> Write for TlsStream<S>
 		
 		// We can only write if the write buffer is emptied first
 		self.write_out()?;
-        // Check if write_out managed to write the whole buffer or if some bytes are remaining
-		if self.out_buf.position() as usize != self.out_buf.get_ref().len() {
-			return Err(io::Error::new(io::ErrorKind::WouldBlock, "write buffer was not empty"))
-		}
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
-        self.out_buf = Cursor::new(self.encrypt(&buf[..len], &sizes)?);
+        let mut encrypted = self.encrypt(&buf[..len], &sizes)?;
+        self.out_buf.set_position(0);
+        self.out_buf.get_mut().clear(); // Does not change allocated capacity
+        self.out_buf.get_mut().append(&mut encrypted);
+        // TODO: not sure if this should be there
+        // it would use less memory but reallocate more often
+        // self.out_buf.get_mut().shrink_to_fit();
 
-		// Pretend we wrote everything because we put it on the write buffer
+        // TODO: we could call self.write_out again here to see if we can immediately
+        // write out more. Should we?
+
+        // Pretend we wrote everything because we put it on the write buffer
         Ok(len)
     }
 
     fn flush(&mut self) -> io::Result<()> {
 		// Make sure the write buffer is emptied
 		self.write_out()?;
-        // Check if write_out managed to write the whole buffer or if some bytes are remaining
-		if self.out_buf.position() as usize != self.out_buf.get_ref().len() {
-			return Err(io::Error::new(io::ErrorKind::WouldBlock, "write was buffer not empty"))
-		}
         self.stream.flush()
     }
 }
