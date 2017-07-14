@@ -800,8 +800,8 @@ impl<S> Write for TlsStream<S>
             None => return Err(io::Error::from_raw_os_error(winapi::SEC_E_CONTEXT_EXPIRED as i32)),
         };
 		
-		// We can only write if the write buffer is emptied first
-		self.write_out()?;
+        // We can only write if the write buffer is emptied first
+        self.write_out()?;
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
