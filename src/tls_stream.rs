@@ -617,16 +617,13 @@ impl<S> TlsStream<S>
     }
 
     fn write_out(&mut self) -> io::Result<usize> {
-        let mut out = 0;
-        while self.out_buf.position() as usize != self.out_buf.get_ref().len() {
-            let position = self.out_buf.position() as usize;
-            let nwritten = try!(self.stream.write(&self.out_buf.get_ref()[position..]));
-            out += nwritten;
-            self.out_buf.set_position((position + nwritten) as u64);
-        }
+        let mut nwritten = 0;
+		let position = self.out_buf.position() as usize;
+		nwritten += try!(self.stream.write(&self.out_buf.get_ref()[position..]));
+		self.out_buf.set_position((position + nwritten) as u64);
 
-        Ok(out)
-    }
+        Ok(nwritten)
+	}
 
     fn read_in(&mut self) -> io::Result<usize> {
         let mut sum_nread = 0;
@@ -727,23 +724,22 @@ impl<S> TlsStream<S>
         }
     }
 
-    fn encrypt(&mut self, buf: &[u8], sizes: &winapi::SecPkgContext_StreamSizes) -> io::Result<()> {
+    fn encrypt(&mut self, buf: &[u8], sizes: &winapi::SecPkgContext_StreamSizes) -> io::Result<Vec<u8>> {
         assert!(buf.len() <= sizes.cbMaximumMessage as usize);
 
-        unsafe {
-            let len = sizes.cbHeader as usize + buf.len() + sizes.cbTrailer as usize;
+        let len = sizes.cbHeader as usize + buf.len() + sizes.cbTrailer as usize;
 
-            if self.out_buf.get_ref().len() < len {
-                self.out_buf.get_mut().resize(len, 0);
-            }
+        let mut output = Vec::<u8>::new();
+        output.resize(len, 0);
 
-            let message_start = sizes.cbHeader as usize;
-            self.out_buf
-                .get_mut()[message_start..message_start + buf.len()]
-                .clone_from_slice(buf);
+        let message_start = sizes.cbHeader as usize;
+        output
+            .get_mut(message_start..message_start + buf.len()).unwrap()
+            .clone_from_slice(buf);
 
+		unsafe {
             let mut bufs = {
-                let out_buf = self.out_buf.get_mut();
+                let out_buf = output.get_mut(..).unwrap();
                 let size = sizes.cbHeader as usize;
 
                 let header = secbuf(winapi::SECBUFFER_STREAM_HEADER,
@@ -759,10 +755,7 @@ impl<S> TlsStream<S>
 
             match secur32::EncryptMessage(self.context.get_mut(), 0, &mut bufdesc, 0) {
                 winapi::SEC_E_OK => {
-                    let len = bufs[0].cbBuffer + bufs[1].cbBuffer + bufs[2].cbBuffer;
-                    self.out_buf.get_mut().truncate(len as usize);
-                    self.out_buf.set_position(0);
-                    Ok(())
+                    Ok(output)
                 }
                 err => Err(io::Error::from_raw_os_error(err as i32)),
             }
@@ -803,22 +796,27 @@ impl<S> Write for TlsStream<S>
             Some(sizes) => sizes,
             None => return Err(io::Error::from_raw_os_error(winapi::SEC_E_CONTEXT_EXPIRED as i32)),
         };
+		
+		// We can only write if the write buffer is emptied first
+		self.write_out()?;
+		if self.out_buf.position() as usize != self.out_buf.get_ref().len() {
+			return Err(io::Error::new(io::ErrorKind::WouldBlock, "write buffer not empty"))
+		}
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
-        // if we have pending output data, it must have been because a previous
-        // attempt to send this data ran into an error. Specifically in the
-        // case of WouldBlock errors, we expect another call to write with the
-        // same data.
-        if self.out_buf.position() == self.out_buf.get_ref().len() as u64 {
-            try!(self.encrypt(&buf[..len], &sizes));
-        }
-        try!(self.write_out());
+        self.out_buf = Cursor::new(self.encrypt(&buf[..len], &sizes)?);
 
+		// Pretend we wrote everything because we put it on the write buffer
         Ok(len)
     }
 
     fn flush(&mut self) -> io::Result<()> {
+		// Make sure pending writes are done
+		self.write_out()?;
+		if self.out_buf.position() as usize != self.out_buf.get_ref().len() {
+			return Err(io::Error::new(io::ErrorKind::WouldBlock, "write buffer not empty"))
+		}
         self.stream.flush()
     }
 }
