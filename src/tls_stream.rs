@@ -626,7 +626,7 @@ impl<S> TlsStream<S>
         }
 
         Ok(out)
-	}
+    }
 
     fn read_in(&mut self) -> io::Result<usize> {
         let mut sum_nread = 0;
