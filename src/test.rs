@@ -21,16 +21,16 @@ use tls_stream::{self, HandshakeError};
 #[test]
 fn basic() {
     let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
-    let stream = TcpStream::connect("google.com:443").unwrap();
+    let stream = TcpStream::connect("httpbin.org:443").unwrap();
     let mut stream = tls_stream::Builder::new()
-        .domain("google.com")
+        .domain("httpbin.org")
         .connect(creds, stream)
         .unwrap();
-    stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
+    stream.write_all(b"GET /get HTTP/1.0\r\nHost: httpbin.org\r\n\r\n").unwrap();
+    stream.flush().unwrap();
     let mut out = vec![];
     stream.read_to_end(&mut out).unwrap();
-    assert!(out.starts_with(b"HTTP/1.0 200 OK"));
-    assert!(out.ends_with(b"</html>"));
+    assert!(out.starts_with(b"HTTP/1.1 200 OK"));
 }
 
 #[test]
@@ -91,16 +91,16 @@ fn valid_protocol() {
         .enabled_protocols(&[Protocol::Tls12])
         .acquire(Direction::Outbound)
         .unwrap();
-    let stream = TcpStream::connect("google.com:443").unwrap();
+    let stream = TcpStream::connect("httpbin.org:443").unwrap();
     let mut stream = tls_stream::Builder::new()
-        .domain("google.com")
+        .domain("httpbin.org")
         .connect(creds, stream)
         .unwrap();
-    stream.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
+    stream.write_all(b"GET /get HTTP/1.0\r\nHost: httpbin.org\r\n\r\n").unwrap();
+    stream.flush().unwrap();
     let mut out = vec![];
     stream.read_to_end(&mut out).unwrap();
-    assert!(out.starts_with(b"HTTP/1.0 200 OK"));
-    assert!(out.ends_with(b"</html>"));
+    assert!(out.starts_with(b"HTTP/1.1 200 OK"));
 }
 
 #[test]
@@ -213,6 +213,7 @@ fn verify_callback_success() {
         .connect(creds, stream)
         .unwrap();
     stream.write_all(b"GET / HTTP/1.0\r\nHost: self-signed.badssl.com\r\n\r\n").unwrap();
+    stream.flush().unwrap();
     let mut out = vec![];
     stream.read_to_end(&mut out).unwrap();
     assert!(out.starts_with(b"HTTP/1.1 200 OK"));
