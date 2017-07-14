@@ -45,7 +45,7 @@ fn invalid_algorithms() {
 #[test]
 fn valid_algorithms() {
     let creds = SchannelCred::builder()
-        .supported_algorithms(&[Algorithm::Aes128, Algorithm::Ecdsa])
+        .supported_algorithms(&[Algorithm::Aes128])
         .acquire(Direction::Outbound)
         .unwrap();
     let stream = TcpStream::connect("httpbin.org:443").unwrap();
