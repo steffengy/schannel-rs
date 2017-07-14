@@ -821,8 +821,8 @@ impl<S> Write for TlsStream<S>
     }
 
     fn flush(&mut self) -> io::Result<()> {
-		// Make sure the write buffer is emptied
-		self.write_out()?;
+        // Make sure the write buffer is emptied
+        self.write_out()?;
         self.stream.flush()
     }
 }
