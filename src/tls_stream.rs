@@ -620,10 +620,18 @@ impl<S> TlsStream<S>
         let mut out = 0;
         while self.out_buf.position() as usize != self.out_buf.get_ref().len() {
             let position = self.out_buf.position() as usize;
-            let nwritten = try!(self.stream.write(&self.out_buf.get_ref()[position..]));
+            let nwritten = self.stream.write(&self.out_buf.get_ref()[position..])?;
             out += nwritten;
             self.out_buf.set_position((position + nwritten) as u64);
         }
+        // TODO: Should unused memory in out_buf be freed up here?
+        /*
+        if out > 0 {
+            let position = self.out_buf.position();
+            self.out_buf.set_position(position - out as u64);
+            self.out_buf.get_mut().drain(..out);
+        }
+        */
 
         Ok(out)
     }
@@ -727,22 +735,28 @@ impl<S> TlsStream<S>
         }
     }
 
-    fn encrypt(&mut self, buf: &[u8], sizes: &winapi::SecPkgContext_StreamSizes) -> io::Result<Vec<u8>> {
+    fn encrypt(&mut self, buf: &[u8], sizes: &winapi::SecPkgContext_StreamSizes) -> io::Result<()> {
         assert!(buf.len() <= sizes.cbMaximumMessage as usize);
 
         let len = sizes.cbHeader as usize + buf.len() + sizes.cbTrailer as usize;
 
-        let mut output = Vec::<u8>::new();
-        output.resize(len, 0);
+        self.out_buf.set_position(0);
+        if self.out_buf.get_ref().len() < len {
+            self.out_buf.get_mut().resize(len, 0);
+        } else {
+            self.out_buf.get_mut().truncate(len); // Does not change capacity
+        }
+        // TODO: Should unused memory in out_buf be freed up here?
+        // self.out_buf.get_mut().shrink_to_fit();
 
         let message_start = sizes.cbHeader as usize;
-        output
-            .get_mut(message_start..message_start + buf.len()).unwrap()
+        self.out_buf
+            .get_mut()[message_start..message_start + buf.len()]
             .clone_from_slice(buf);
 
 		unsafe {
             let mut bufs = {
-                let out_buf = output.get_mut(..).unwrap();
+                let out_buf = self.out_buf.get_mut();
                 let size = sizes.cbHeader as usize;
 
                 let header = secbuf(winapi::SECBUFFER_STREAM_HEADER,
@@ -758,7 +772,7 @@ impl<S> TlsStream<S>
 
             match secur32::EncryptMessage(self.context.get_mut(), 0, &mut bufdesc, 0) {
                 winapi::SEC_E_OK => {
-                    Ok(output)
+                    Ok(())
                 }
                 err => Err(io::Error::from_raw_os_error(err as i32)),
             }
@@ -805,16 +819,7 @@ impl<S> Write for TlsStream<S>
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
-        let mut encrypted = self.encrypt(&buf[..len], &sizes)?;
-        self.out_buf.set_position(0);
-        self.out_buf.get_mut().clear(); // Does not change allocated capacity
-        self.out_buf.get_mut().append(&mut encrypted);
-        // TODO: not sure if this should be there
-        // it would use less memory but reallocate more often
-        // self.out_buf.get_mut().shrink_to_fit();
-
-        // TODO: we could call self.write_out again here to see if we can immediately
-        // write out more. Should we?
+        self.encrypt(&buf[..len], &sizes)?;
 
         // Pretend we wrote everything because we put it on the write buffer
         Ok(len)
