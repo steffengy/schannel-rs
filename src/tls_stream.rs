@@ -620,18 +620,10 @@ impl<S> TlsStream<S>
         let mut out = 0;
         while self.out_buf.position() as usize != self.out_buf.get_ref().len() {
             let position = self.out_buf.position() as usize;
-            let nwritten = self.stream.write(&self.out_buf.get_ref()[position..])?;
+            let nwritten = try!(self.stream.write(&self.out_buf.get_ref()[position..]));
             out += nwritten;
             self.out_buf.set_position((position + nwritten) as u64);
         }
-        // TODO: Should unused memory in out_buf be freed up here?
-        /*
-        if out > 0 {
-            let position = self.out_buf.position();
-            self.out_buf.set_position(position - out as u64);
-            self.out_buf.get_mut().drain(..out);
-        }
-        */
 
         Ok(out)
     }
@@ -746,8 +738,6 @@ impl<S> TlsStream<S>
         } else {
             self.out_buf.get_mut().truncate(len); // Does not change capacity
         }
-        // TODO: Should unused memory in out_buf be freed up here?
-        // self.out_buf.get_mut().shrink_to_fit();
 
         let message_start = sizes.cbHeader as usize;
         self.out_buf
@@ -815,11 +805,11 @@ impl<S> Write for TlsStream<S>
         };
 		
         // We can only write if the write buffer is emptied first
-        self.write_out()?;
+        try!(self.write_out());
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
-        self.encrypt(&buf[..len], &sizes)?;
+        try!(self.encrypt(&buf[..len], &sizes));
 
         // Pretend we wrote everything because we put it on the write buffer
         Ok(len)
@@ -827,7 +817,7 @@ impl<S> Write for TlsStream<S>
 
     fn flush(&mut self) -> io::Result<()> {
         // Make sure the write buffer is emptied
-        self.write_out()?;
+        try!(self.write_out());
         self.stream.flush()
     }
 }
