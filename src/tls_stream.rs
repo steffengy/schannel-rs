@@ -730,17 +730,18 @@ impl<S> TlsStream<S>
     fn encrypt(&mut self, buf: &[u8], sizes: &winapi::SecPkgContext_StreamSizes) -> io::Result<()> {
         assert!(buf.len() <= sizes.cbMaximumMessage as usize);
 
-        let len = sizes.cbHeader as usize + buf.len() + sizes.cbTrailer as usize;
+        unsafe {
+            let len = sizes.cbHeader as usize + buf.len() + sizes.cbTrailer as usize;
 
-        self.out_buf.set_position(0);
-        self.out_buf.get_mut().resize(len, 0);
+            if self.out_buf.get_ref().len() < len {
+                self.out_buf.get_mut().resize(len, 0);
+            }
 
-        let message_start = sizes.cbHeader as usize;
-        self.out_buf
-            .get_mut()[message_start..message_start + buf.len()]
-            .clone_from_slice(buf);
+            let message_start = sizes.cbHeader as usize;
+            self.out_buf
+                .get_mut()[message_start..message_start + buf.len()]
+                .clone_from_slice(buf);
 
-		unsafe {
             let mut bufs = {
                 let out_buf = self.out_buf.get_mut();
                 let size = sizes.cbHeader as usize;
@@ -760,6 +761,7 @@ impl<S> TlsStream<S>
                 winapi::SEC_E_OK => {
                     let len = bufs[0].cbBuffer + bufs[1].cbBuffer + bufs[2].cbBuffer;
                     self.out_buf.get_mut().truncate(len as usize);
+                    self.out_buf.set_position(0);
                     Ok(())
                 }
                 err => Err(io::Error::from_raw_os_error(err as i32)),
