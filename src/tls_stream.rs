@@ -733,11 +733,7 @@ impl<S> TlsStream<S>
         let len = sizes.cbHeader as usize + buf.len() + sizes.cbTrailer as usize;
 
         self.out_buf.set_position(0);
-        if self.out_buf.get_ref().len() < len {
-            self.out_buf.get_mut().resize(len, 0);
-        } else {
-            self.out_buf.get_mut().truncate(len); // Does not change capacity
-        }
+        self.out_buf.get_mut().resize(len, 0);
 
         let message_start = sizes.cbHeader as usize;
         self.out_buf
@@ -762,6 +758,8 @@ impl<S> TlsStream<S>
 
             match secur32::EncryptMessage(self.context.get_mut(), 0, &mut bufdesc, 0) {
                 winapi::SEC_E_OK => {
+                    let len = bufs[0].cbBuffer + bufs[1].cbBuffer + bufs[2].cbBuffer;
+                    self.out_buf.get_mut().truncate(len as usize);
                     Ok(())
                 }
                 err => Err(io::Error::from_raw_os_error(err as i32)),
