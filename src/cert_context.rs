@@ -21,6 +21,27 @@ const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG: winapi::DWORD = 0x10000;
 // FIXME
 const CRYPT_STRING_BASE64HEADER: winapi::DWORD = 0x0;
 
+lazy_static! {
+    static ref szOID_KEY_USAGE: Vec<u8> =
+        winapi::wincrypt::szOID_KEY_USAGE.bytes().chain(Some(0)).collect();
+}
+
+// For some reason this isn't in rust WINAPI, but it probably should be.
+#[derive(Clone)]
+#[repr(C)]
+struct CERT_KEY_USAGE_RESTRICTION_INFO {
+    pub cCertPolicyId: winapi::minwindef::DWORD,
+    pub rgCertPolicyId: CERT_POLICY_ID,
+    pub RestrictedKeyUsage: winapi::wincrypt::CRYPT_BIT_BLOB,
+}
+
+#[derive(Clone)]
+#[repr(C)]
+struct CERT_POLICY_ID {
+    pub cCertPolicyElementId: winapi::minwindef::DWORD,
+    pub rgpszCertPolicyElementId: *mut winapi::LPCSTR,
+}
+
 /// A supported hashing algorithm
 pub struct HashAlgorithm(winapi::DWORD, usize);
 
@@ -45,6 +66,44 @@ impl HashAlgorithm {
     pub fn sha512() -> HashAlgorithm {
         HashAlgorithm(winapi::CALG_SHA_512, 64)
     }
+}
+
+pub struct KeyUsageInfo(CERT_KEY_USAGE_RESTRICTION_INFO);
+
+impl KeyUsageInfo {
+    /// Returns True if the KeyUsageInfo has the Digital Signature flag set.
+    pub fn is_digital_signature(&self) -> bool {
+                println!("is dig sig");
+        unsafe {
+            let offset = winapi::wincrypt::CERT_DIGITAL_SIGNATURE_KEY_USAGE;
+            println!("offset: {}", offset);
+            println!("pbData addr: {:x}", self.0.RestrictedKeyUsage.pbData as i32);
+            println!("cbData: {:x}", self.0.RestrictedKeyUsage.pbData as i32);
+            if self.0.RestrictedKeyUsage.pbData as usize != 0 {
+                println!("pbdata deref: {}", *(self.0.RestrictedKeyUsage.pbData));
+                let byte = *(self.0.RestrictedKeyUsage.pbData);
+                println!("byte: {}", byte);
+                println!("byte: {}", byte as u32);
+                return byte as u32 & offset == offset;
+            } else {
+                // if no flags, key is not "restricted", so return false
+                return false;
+            }
+
+            // println!("Offset: {:?}", offset);
+            // let byte = offset / 8;
+            // let bit = offset % 8;
+            // println!("pbdata: {:?}", *(self.0.RestrictedKeyUsage.pbData));
+            // println!("cbdata: {:?}", self.0.RestrictedKeyUsage.cbData);
+            // if self.0.RestrictedKeyUsage.pbData as usize != 0 {
+            //     let byte = *(self.0.RestrictedKeyUsage.pbData.offset(byte as isize));
+            //     println!("byte: {}", byte);
+            //     return (byte & (1<< bit)) == 1;
+            // } else {
+            //     return false;
+            // }
+        }
+     }
 }
 
 /// Wrapper of a winapi certificate, or a `PCCERT_CONTEXT`.
@@ -200,6 +259,46 @@ impl CertContext {
         AcquirePrivateKeyOptions {
             cert: self,
             flags: 0,
+        }
+    }
+
+    pub fn key_usage(&self) -> Option<KeyUsageInfo> {
+        unsafe {
+            //println!("Getting Key usage");
+            if (*self.0).pCertInfo.is_null() {
+                return None;
+            }
+            let mut keyUsageExtension = crypt32::CertFindExtension(szOID_KEY_USAGE.as_ptr() as winapi::LPSTR, (*(*self.0).pCertInfo).cExtension, (*(*self.0).pCertInfo).rgExtension);
+            if keyUsageExtension.is_null() {
+                return None;
+            } else {
+                //println!("Found Extension");
+                let mut len = 0;
+                let mut keyUsage: *mut CERT_KEY_USAGE_RESTRICTION_INFO = ptr::null_mut();
+                let result = crypt32::CryptDecodeObjectEx(
+                    winapi::wincrypt::X509_ASN_ENCODING,
+                    (*keyUsageExtension).pszObjId,
+                    (*keyUsageExtension).Value.pbData,
+                    (*keyUsageExtension).Value.cbData,
+                    winapi::CRYPT_DECODE_ALLOC_FLAG,
+                    ptr::null_mut(),
+                    &mut keyUsage as *mut _ as *mut winapi::c_void,
+                    &mut len);
+                // let result = crypt32::CryptFormatObject(
+                //     winapi::wincrypt::X509_ASN_ENCODING,
+                //     (*keyUsageExtension).pszObjId,
+                //     (*keyUsageExtension).Value.pbData,
+                //     (*keyUsageExtension).Value.cbData,
+                //     winapi::CRYPT_DECODE_ALLOC_FLAG,
+                //     ptr::null_mut(),
+                //     &mut keyUsage as *mut _ as *mut winapi::c_void,
+                //     &mut len);
+
+                println!("len: {}", len);
+                println!("decoded Key usage");
+                    
+                return Some(KeyUsageInfo((*keyUsage).clone()));
+            }
         }
     }
 
