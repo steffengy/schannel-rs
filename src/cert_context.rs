@@ -21,6 +21,11 @@ const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG: winapi::DWORD = 0x10000;
 // FIXME
 const CRYPT_STRING_BASE64HEADER: winapi::DWORD = 0x0;
 
+lazy_static! {
+    static ref szOID_KEY_USAGE: Vec<u8> =
+        winapi::wincrypt::szOID_KEY_USAGE.bytes().chain(Some(0)).collect();
+}
+
 /// A supported hashing algorithm
 pub struct HashAlgorithm(winapi::DWORD, usize);
 
@@ -200,6 +205,35 @@ impl CertContext {
         AcquirePrivateKeyOptions {
             cert: self,
             flags: 0,
+        }
+    }
+
+    /// Returns a string that describes the intended key usages of the certificate.
+    pub fn key_usage(&self) -> Option<String> {
+        unsafe {
+            println!("Getting Key usage");
+            if (*self.0).pCertInfo.is_null() {
+                return None;
+            }
+            let mut keyUsageExtension = crypt32::CertFindExtension(szOID_KEY_USAGE.as_ptr() as winapi::LPSTR, (*(*self.0).pCertInfo).cExtension, (*(*self.0).pCertInfo).rgExtension);
+            if keyUsageExtension.is_null() {
+                return None;
+            } else {
+                let mut len = 500;
+                let amt = (len / 2) as usize;
+                let mut buf = vec![0u16; amt];
+                let result = crypt32::CryptFormatObject(
+                    winapi::wincrypt::X509_ASN_ENCODING,
+                    0,
+                    0,
+                    ptr::null_mut(),
+                    (*keyUsageExtension).pszObjId,
+                    (*keyUsageExtension).Value.pbData,
+                    (*keyUsageExtension).Value.cbData,
+                    buf.as_mut_ptr() as *mut winapi::c_void,
+                    &mut len);
+                return Some(OsString::from_wide(&buf[..amt - 1]).into_string().unwrap())
+            }
         }
     }
 
