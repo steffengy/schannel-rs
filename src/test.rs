@@ -168,29 +168,6 @@ fn wrong_host_cert() {
 }
 
 #[test]
-fn key_usage() {
-    println!("opening store");
-    if let Ok(mut cert_store) = CertStore::open_current_user("My") {
-        println!("open");
-        let mut num_sigs = 0;
-        for cert in cert_store.certs() {
-            println!("cert: {:?}", cert.sha1());
-            if let Some(usage) = cert.key_usage() {
-                if usage.contains("Digital Signature") {
-                    println!("Signature");                    
-                    num_sigs = num_sigs + 1;
-                } else {
-                    println!("Not a signature");                    
-                }
-            } else {
-                println!("No usage");                                    
-            }
-        }
-        assert_eq!(num_sigs, 3);
-    }
-}
-
-#[test]
 fn shutdown() {
     let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
