@@ -22,6 +22,8 @@ const CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG: winapi::DWORD = 0x10000;
 const CRYPT_STRING_BASE64HEADER: winapi::DWORD = 0x0;
 
 lazy_static! {
+    // static ref szOID_KEY_USAGE_RESTRICTION: Vec<u8> =
+    //     winapi::wincrypt::szOID_KEY_USAGE_RESTRICTION.bytes().chain(Some(0)).collect();
     static ref szOID_KEY_USAGE: Vec<u8> =
         winapi::wincrypt::szOID_KEY_USAGE.bytes().chain(Some(0)).collect();
 }
@@ -73,6 +75,7 @@ pub struct KeyUsageInfo(CERT_KEY_USAGE_RESTRICTION_INFO);
 impl KeyUsageInfo {
     /// Returns True if the KeyUsageInfo has the Digital Signature flag set.
     pub fn is_digital_signature(&self) -> bool {
+    return true;
                 println!("is dig sig");
         unsafe {
             let offset = winapi::wincrypt::CERT_DIGITAL_SIGNATURE_KEY_USAGE;
@@ -262,9 +265,9 @@ impl CertContext {
         }
     }
 
-    pub fn key_usage(&self) -> Option<KeyUsageInfo> {
+    pub fn key_usage(&self) -> Option<String> {
         unsafe {
-            //println!("Getting Key usage");
+            println!("Getting Key usage");
             if (*self.0).pCertInfo.is_null() {
                 return None;
             }
@@ -272,32 +275,20 @@ impl CertContext {
             if keyUsageExtension.is_null() {
                 return None;
             } else {
-                //println!("Found Extension");
-                let mut len = 0;
-                let mut keyUsage: *mut CERT_KEY_USAGE_RESTRICTION_INFO = ptr::null_mut();
-                let result = crypt32::CryptDecodeObjectEx(
+                let mut len = 500;
+                let amt = (len / 2) as usize;
+                let mut buf = vec![0u16; amt];
+                let result = crypt32::CryptFormatObject(
                     winapi::wincrypt::X509_ASN_ENCODING,
+                    0,
+                    0,
+                    ptr::null_mut(),
                     (*keyUsageExtension).pszObjId,
                     (*keyUsageExtension).Value.pbData,
                     (*keyUsageExtension).Value.cbData,
-                    winapi::CRYPT_DECODE_ALLOC_FLAG,
-                    ptr::null_mut(),
-                    &mut keyUsage as *mut _ as *mut winapi::c_void,
+                    buf.as_mut_ptr() as *mut winapi::c_void,
                     &mut len);
-                // let result = crypt32::CryptFormatObject(
-                //     winapi::wincrypt::X509_ASN_ENCODING,
-                //     (*keyUsageExtension).pszObjId,
-                //     (*keyUsageExtension).Value.pbData,
-                //     (*keyUsageExtension).Value.cbData,
-                //     winapi::CRYPT_DECODE_ALLOC_FLAG,
-                //     ptr::null_mut(),
-                //     &mut keyUsage as *mut _ as *mut winapi::c_void,
-                //     &mut len);
-
-                println!("len: {}", len);
-                println!("decoded Key usage");
-                    
-                return Some(KeyUsageInfo((*keyUsage).clone()));
+                return Some(OsString::from_wide(&buf[..amt - 1]).into_string().unwrap())
             }
         }
     }
