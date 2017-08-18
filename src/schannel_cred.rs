@@ -193,7 +193,7 @@ impl Builder {
             let mut handle = mem::zeroed();
             let mut cred_data: winapi::SCHANNEL_CRED = mem::zeroed();
             cred_data.dwVersion = winapi::SCHANNEL_CRED_VERSION;
-            cred_data.dwFlags = winapi::SCH_USE_STRONG_CRYPTO;
+            cred_data.dwFlags = winapi::SCH_USE_STRONG_CRYPTO | winapi::SCH_CRED_NO_DEFAULT_CREDS;
             if let Some(ref supported_algorithms) = self.supported_algorithms {
                 cred_data.cSupportedAlgs = supported_algorithms.len() as winapi::DWORD;
                 cred_data.palgSupportedAlgs = supported_algorithms.as_ptr() as *mut _;
