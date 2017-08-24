@@ -22,4 +22,5 @@ build: off
 
 test_script:
   # TODO remove this loop when server 2016 lands on appveyor; related to https://github.com/steffengy/schannel-rs/issues/8
+  - set RUST_BACKTRACE=1
   - ps: for($i=1; $i -le 3; $i++) { cmd /c "cargo test 2>&1"; if ($?) { break } }

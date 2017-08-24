@@ -803,22 +803,21 @@ impl<S> Write for TlsStream<S>
             Some(sizes) => sizes,
             None => return Err(io::Error::from_raw_os_error(winapi::SEC_E_CONTEXT_EXPIRED as i32)),
         };
+		
+        // We can only write if the write buffer is emptied first
+        try!(self.write_out());
 
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
-        // if we have pending output data, it must have been because a previous
-        // attempt to send this data ran into an error. Specifically in the
-        // case of WouldBlock errors, we expect another call to write with the
-        // same data.
-        if self.out_buf.position() == self.out_buf.get_ref().len() as u64 {
-            try!(self.encrypt(&buf[..len], &sizes));
-        }
-        try!(self.write_out());
+        try!(self.encrypt(&buf[..len], &sizes));
 
+        // Pretend we wrote everything because we put it on the write buffer
         Ok(len)
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        // Make sure the write buffer is emptied
+        try!(self.write_out());
         self.stream.flush()
     }
 }
