@@ -150,6 +150,7 @@ impl Builder {
             dec_in: Cursor::new(Vec::new()),
             enc_in: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.map(|b| b.to_owned()).unwrap_or(Vec::new())),
+            last_write_len: 0,
         };
 
         MidHandshakeTlsStream {
@@ -187,6 +188,8 @@ pub struct TlsStream<S> {
     enc_in: Cursor<Vec<u8>>,
     // valid from position() to len()
     out_buf: Cursor<Vec<u8>>,
+    /// the (unencrypted) length of the last write call used to track writes
+    last_write_len: usize,
 }
 
 /// ensures that a TlsStream is always Sync/Send
@@ -625,6 +628,7 @@ impl<S> TlsStream<S>
             self.out_buf.set_position((position + nwritten) as u64);
         }
 
+        self.last_write_len = 0;
         Ok(out)
     }
 
@@ -798,21 +802,27 @@ impl<S> MidHandshakeTlsStream<S>
 impl<S> Write for TlsStream<S>
     where S: Read + Write
 {
+    /// In the case of a WouldBlock error, we expect another call
+    /// starting with the same input data
+    /// This is similar to the use of ACCEPT_MOVING_WRITE_BUFFER in openssl
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let sizes = match try!(self.initialize()) {
             Some(sizes) => sizes,
             None => return Err(io::Error::from_raw_os_error(winapi::SEC_E_CONTEXT_EXPIRED as i32)),
         };
-		
-        // We can only write if the write buffer is emptied first
-        try!(self.write_out());
-
+        
         let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
-        try!(self.encrypt(&buf[..len], &sizes));
-
+        // if we have pending output data, it must have been because a previous
+        // attempt to send this part of the data ran into an error.
+        if self.out_buf.position() == self.out_buf.get_ref().len() as u64 {
+            let left_buf = &buf[self.last_write_len..];
+            self.last_write_len += len;
+            if !left_buf.is_empty() {
+                try!(self.encrypt(left_buf, &sizes));
+            }
+        }
         try!(self.write_out());
-
 
         Ok(len)
     }
