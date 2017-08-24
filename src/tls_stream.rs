@@ -811,7 +811,9 @@ impl<S> Write for TlsStream<S>
 
         try!(self.encrypt(&buf[..len], &sizes));
 
-        // Pretend we wrote everything because we put it on the write buffer
+        try!(self.write_out());
+
+
         Ok(len)
     }
 
