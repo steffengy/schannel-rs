@@ -810,21 +810,17 @@ impl<S> Write for TlsStream<S>
             Some(sizes) => sizes,
             None => return Err(io::Error::from_raw_os_error(winapi::SEC_E_CONTEXT_EXPIRED as i32)),
         };
-        
-        let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
 
         // if we have pending output data, it must have been because a previous
         // attempt to send this part of the data ran into an error.
         if self.out_buf.position() == self.out_buf.get_ref().len() as u64 {
-            let left_buf = &buf[self.last_write_len..];
-            self.last_write_len += len;
-            if !left_buf.is_empty() {
-                try!(self.encrypt(left_buf, &sizes));
-            }
+            let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
+            try!(self.encrypt(&buf[..len], &sizes));
+            self.last_write_len = len;
         }
         try!(self.write_out());
 
-        Ok(len)
+        Ok(self.last_write_len)
     }
 
     fn flush(&mut self) -> io::Result<()> {
