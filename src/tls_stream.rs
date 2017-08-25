@@ -628,7 +628,6 @@ impl<S> TlsStream<S>
             self.out_buf.set_position((position + nwritten) as u64);
         }
 
-        self.last_write_len = 0;
         Ok(out)
     }
 
