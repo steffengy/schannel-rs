@@ -1,6 +1,6 @@
 //! Bindings to winapi's `PCCERT_CONTEXT` APIs.
 
-use std::ffi::OsString;
+use std::ffi::{CStr, OsString};
 use std::io;
 use std::mem;
 use std::os::windows::prelude::*;
@@ -86,6 +86,11 @@ impl CertContext {
         }
     }
 
+    /// Get certificate in binary DER form
+    pub fn to_der<'a>(&'a self) -> &'a [u8] {
+        self.get_encoded_bytes()
+    }
+
     /// Decodes a PEM-formatted X509 certificate.
     pub fn from_pem(pem: &str) -> io::Result<CertContext> {
         unsafe {
@@ -116,6 +121,43 @@ impl CertContext {
             }
 
             CertContext::new(&buf)
+        }
+    }
+
+    /// Get certificate as PEM-formatted X509 certificate.
+    pub fn to_pem(&self) -> io::Result<String> {
+        unsafe {
+            let mut len = 0;
+            let ok = crypt32::CryptBinaryToStringA(
+                (*self.0).pbCertEncoded,
+                (*self.0).cbCertEncoded,
+                0 as winapi::DWORD,
+                ptr::null_mut(),
+                &mut len,
+            );
+            if ok != winapi::TRUE {
+                return Err(io::Error::last_os_error());
+            }
+
+            let mut buf = vec![0u8; len as usize];
+            let ok = crypt32::CryptBinaryToStringA(
+                (*self.0).pbCertEncoded,
+                (*self.0).cbCertEncoded,
+                0 as winapi::DWORD,
+                buf.as_mut_ptr() as *mut i8,
+                &mut len,
+            );
+            if ok != winapi::TRUE {
+                return Err(io::Error::last_os_error());
+            }
+
+            buf.pop();
+            String::from_utf8(buf).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    "CryptBinaryToStringA() returned unconvertable string",
+                )
+            })
         }
     }
 
@@ -228,7 +270,48 @@ impl CertContext {
         }
     }
 
-    fn get_encoded_bytes(&self) -> &[u8] {
+    /// Returns the valid uses for this certificate
+    pub fn valid_uses(&self) -> io::Result<ValidUses> {
+        unsafe {
+            let mut buf_len = 0;
+            let ok = crypt32::CertGetEnhancedKeyUsage(self.0, 0, ptr::null_mut(), &mut buf_len);
+
+            if ok != winapi::TRUE {
+                return Err(io::Error::last_os_error());
+            }
+
+            let mut buf = vec![0u8; buf_len as usize];
+            let cert_enhkey_usage = buf.as_mut_ptr() as *mut winapi::CERT_ENHKEY_USAGE;
+
+            let ok = crypt32::CertGetEnhancedKeyUsage(self.0, 0, cert_enhkey_usage, &mut buf_len);
+            if ok != winapi::TRUE {
+                return Err(io::Error::last_os_error());
+            }
+
+            let use_cnt = (*cert_enhkey_usage).cUsageIdentifier;
+            if use_cnt == 0 {
+                let last_error = io::Error::last_os_error();
+                return match last_error.raw_os_error() {
+                    Some(winapi::winerror::CRYPT_E_NOT_FOUND) => Ok(ValidUses::All),
+                    Some(0) => Ok(ValidUses::None),
+                    _ => Err(last_error),
+                };
+            }
+
+            let mut oids: Vec<String> = Vec::with_capacity(use_cnt as usize);
+            for i in 0..use_cnt {
+                let oid_ptr = (*cert_enhkey_usage).rgpszUsageIdentifier;
+                oids.push(
+                    CStr::from_ptr(*(oid_ptr.offset(i as isize)))
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+            Ok(ValidUses::OIDs(oids))
+        }
+    }
+
+    fn get_encoded_bytes<'a>(&'a self) -> &'a [u8] {
         unsafe {
             let cert_ctx = *self.0;
             slice::from_raw_parts(cert_ctx.pbCertEncoded, cert_ctx.cbCertEncoded as usize)
@@ -488,6 +571,18 @@ impl KeySpec {
     }
 }
 
+/// Valid uses of a Certificate - All, None, or specific OIDs
+pub enum ValidUses {
+    /// Certificate is valid for all uses
+    All,
+
+    /// Certificate is not valid for any use
+    None,
+
+    /// Certificate is valid for uses specified
+    OIDs(Vec<String>),
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -500,6 +595,24 @@ mod test {
         let der = CertContext::new(der).unwrap();
         let pem = CertContext::from_pem(pem).unwrap();
         assert_eq!(der, pem);
+    }
+
+    #[test]
+    fn certcontext_to_der() {
+        let der = include_bytes!("../test/cert.der");
+        let cert = CertContext::new(der).unwrap();
+        let der2 = CertContext::to_der(&cert);
+        assert_eq!(der as &[u8], der2);
+    }
+
+    #[test]
+    fn certcontext_to_pem() {
+        let der = include_bytes!("../test/cert.der");
+        let pem1 = include_str!("../test/cert.pem").replace("\r", "");
+
+        let der = CertContext::new(der).unwrap();
+        let pem2 = CertContext::to_pem(&der).unwrap().replace("\r", "");
+        assert_eq!(pem1, pem2);
     }
 
     #[test]
