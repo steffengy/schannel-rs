@@ -139,25 +139,19 @@ impl CertContext {
                 return Err(io::Error::last_os_error());
             }
 
-            let mut buf = vec![0u8; len as usize];
+            let mut buf = vec![0; len as usize];
             let ok = crypt32::CryptBinaryToStringA(
                 (*self.0).pbCertEncoded,
                 (*self.0).cbCertEncoded,
                 CRYPT_STRING_BASE64HEADER,
-                buf.as_mut_ptr() as *mut i8,
+                buf.as_mut_ptr(),
                 &mut len,
             );
             if ok != winapi::TRUE {
                 return Err(io::Error::last_os_error());
             }
 
-            buf.pop();
-            String::from_utf8(buf).map_err(|_| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "CryptBinaryToStringA() returned unconvertable string",
-                )
-            })
+            Ok(CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned())
         }
     }
 
