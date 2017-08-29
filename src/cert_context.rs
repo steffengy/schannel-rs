@@ -287,7 +287,7 @@ impl CertContext {
                 let last_error = io::Error::last_os_error();
                 return match last_error.raw_os_error() {
                     Some(winapi::winerror::CRYPT_E_NOT_FOUND) => Ok(ValidUses::All),
-                    Some(0) => Ok(ValidUses::None),
+                    Some(0) => Ok(ValidUses::OIDs(Vec::new())),
                     _ => Err(last_error),
                 };
             }
@@ -570,10 +570,8 @@ pub enum ValidUses {
     /// Certificate is valid for all uses
     All,
 
-    /// Certificate is not valid for any use
-    None,
-
-    /// Certificate is valid for uses specified
+    /// Certificate is valid for uses specified. No entries means that the certificate
+    /// has no valid uses.
     OIDs(Vec<String>),
 }
 
