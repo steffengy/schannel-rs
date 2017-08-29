@@ -131,7 +131,7 @@ impl CertContext {
             let ok = crypt32::CryptBinaryToStringA(
                 (*self.0).pbCertEncoded,
                 (*self.0).cbCertEncoded,
-                0 as winapi::DWORD,
+                CRYPT_STRING_BASE64HEADER,
                 ptr::null_mut(),
                 &mut len,
             );
@@ -143,7 +143,7 @@ impl CertContext {
             let ok = crypt32::CryptBinaryToStringA(
                 (*self.0).pbCertEncoded,
                 (*self.0).cbCertEncoded,
-                0 as winapi::DWORD,
+                CRYPT_STRING_BASE64HEADER,
                 buf.as_mut_ptr() as *mut i8,
                 &mut len,
             );
