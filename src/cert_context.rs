@@ -301,7 +301,7 @@ impl CertContext {
                         .into_owned(),
                 );
             }
-            Ok(ValidUses::OIDs(oids))
+            Ok(ValidUses::Oids(oids))
         }
     }
 
@@ -565,14 +565,14 @@ impl KeySpec {
     }
 }
 
-/// Valid uses of a Certificate - All, None, or specific OIDs
+/// Valid uses of a Certificate - All, or specific OIDs
 pub enum ValidUses {
     /// Certificate is valid for all uses
     All,
 
     /// Certificate is valid for uses specified. No entries means that the certificate
     /// has no valid uses.
-    OIDs(Vec<String>),
+    Oids(Vec<String>),
 }
 
 #[cfg(test)]
