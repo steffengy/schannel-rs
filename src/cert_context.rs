@@ -285,10 +285,10 @@ impl CertContext {
             let use_cnt = (*cert_enhkey_usage).cUsageIdentifier;
             if use_cnt == 0 {
                 let last_error = io::Error::last_os_error();
-                return match last_error.raw_os_error() {
-                    Some(winapi::winerror::CRYPT_E_NOT_FOUND) => Ok(ValidUses::All),
-                    Some(0) => Ok(ValidUses::OIDs(Vec::new())),
-                    _ => Err(last_error),
+                match last_error.raw_os_error() {
+                    Some(winapi::winerror::CRYPT_E_NOT_FOUND) => return Ok(ValidUses::All),
+                    Some(0) => (),
+                    _ => return Err(last_error),
                 };
             }
 
