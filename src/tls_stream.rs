@@ -305,6 +305,17 @@ impl<S> TlsStream<S>
         &self.dec_in.get_ref()[self.dec_in.position() as usize..]
     }
 
+    /// Returns the bytes of the current TLS finish message.
+    ///
+    /// This is commonly used for the "tls-unique" channel binding, as indicated by RFC5929.
+    pub fn get_finish(&self) -> io::Result<&[u8]> {
+        const UNIQUE_PREFIX: &[u8] = b"tls-unique:";
+
+        let bindings = try!(self.context.unique_channel_bindings());
+        assert!(bindings.starts_with(UNIQUE_PREFIX));
+        Ok(&bindings[UNIQUE_PREFIX.len()..])
+    }
+
     /// Shuts the TLS session down.
     pub fn shutdown(&mut self) -> io::Result<()> {
         match self.state {

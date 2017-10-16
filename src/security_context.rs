@@ -1,8 +1,9 @@
 use winapi;
 use secur32;
+use std::io;
 use std::mem;
 use std::ptr;
-use std::io;
+use std::slice;
 
 use {INIT_REQUESTS, Inner, secbuf, secbuf_desc};
 use cert_context::CertContext;
@@ -99,6 +100,25 @@ impl SecurityContext {
                                                           &mut cert_context as *mut _ as *mut _);
             if status == winapi::SEC_E_OK {
                 Ok(CertContext::from_inner(cert_context))
+            } else {
+                Err(io::Error::from_raw_os_error(status as i32))
+            }
+        }
+    }
+
+    pub fn unique_channel_bindings(&self) -> io::Result<&[u8]> {
+        unsafe {
+            let mut bindings: winapi::SecPkgContext_Bindings = mem::zeroed();
+            let status = secur32::QueryContextAttributesW(&self.0 as *const _ as *mut _,
+                                                          winapi::SECPKG_ATTR_UNIQUE_BINDINGS,
+                                                          &mut bindings as *mut _ as *mut _);
+            if status == winapi::SEC_E_OK {
+                let buf = slice::from_raw_parts(bindings.Bindings as *const u8, 
+                                                bindings.BindingsLength as usize);
+                let binding = &*bindings.Bindings;
+                let offset = binding.dwApplicationDataOffset as usize;
+                let length = binding.cbApplicationDataLength as usize;
+                Ok(&buf[offset..][..length])
             } else {
                 Err(io::Error::from_raw_os_error(status as i32))
             }
