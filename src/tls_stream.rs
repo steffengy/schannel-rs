@@ -722,7 +722,7 @@ impl<S> TlsStream<S>
                         self.enc_in.position() as usize
                     };
                     self.consume_enc_in(nread);
-                    self.needs_read = (self.enc_in.position() == 0) as usize;
+                    self.needs_read = 0;
                     Ok(false)
                 }
                 e => Err(io::Error::from_raw_os_error(e as i32)),
