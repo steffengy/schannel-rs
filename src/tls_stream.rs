@@ -215,10 +215,18 @@ pub struct CertValidationResult {
 }
 
 impl CertValidationResult {
-    /// Returns the certificate that failed validation if applicable
+    /// Returns the certificate that failed validation if applicable. If error is applies to more than one cert, returns None
     pub fn failed_certificate(&self) -> Option<CertContext> {
         if let Some(cert_chain) = self.chain.get_chain(self.chain_index as usize) {
             return cert_chain.get(self.element_index as usize);
+        }
+        None
+    }
+
+    /// Returns the certificate chain that failed validation if applicable. If error applies more generally, returns None
+    pub fn failed_chain(&self) -> Option<CertChain> {
+        if let Some(cert_chain) = self.chain.get_chain(self.chain_index as usize) {
+            return Some(cert_chain);
         }
         None
     }
