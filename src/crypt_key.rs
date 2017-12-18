@@ -1,16 +1,15 @@
 //! CryptoAPI private keys.
-use advapi32;
-use winapi;
+use winapi::um::wincrypt;
 
 /// A handle to a key.
-pub struct CryptKey(winapi::HCRYPTKEY);
+pub struct CryptKey(wincrypt::HCRYPTKEY);
 
 impl Drop for CryptKey {
     fn drop(&mut self) {
         unsafe {
-            advapi32::CryptDestroyKey(self.0);
+            wincrypt::CryptDestroyKey(self.0);
         }
     }
 }
 
-inner!(CryptKey, winapi::HCRYPTKEY);
+inner!(CryptKey, wincrypt::HCRYPTKEY);

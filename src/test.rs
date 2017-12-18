@@ -1,7 +1,3 @@
-extern crate advapi32;
-
-use crypt32;
-use kernel32;
 use std::env;
 use std::io::{self, Read, Write, Error};
 use std::mem;
@@ -9,7 +5,9 @@ use std::net::{TcpStream, TcpListener};
 use std::ptr;
 use std::sync::{Once, ONCE_INIT};
 use std::thread;
-use winapi;
+use winapi::shared::minwindef as winapi;
+use winapi::shared::{basetsd, ntdef, lmcons, winerror};
+use winapi::um::{minwinbase, sysinfoapi, timezoneapi, wincrypt};
 
 use Inner;
 use crypt_prov::{AcquireOptions, ProviderType};
@@ -39,7 +37,7 @@ fn invalid_algorithms() {
         .supported_algorithms(&[Algorithm::Rc2, Algorithm::Ecdsa])
         .acquire(Direction::Outbound);
     assert_eq!(creds.err().unwrap().raw_os_error().unwrap(),
-               winapi::SEC_E_ALGORITHM_MISMATCH as i32);
+               winerror::SEC_E_ALGORITHM_MISMATCH as i32);
 }
 
 #[test]
@@ -82,7 +80,7 @@ fn invalid_protocol() {
         .unwrap();
     let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
-               winapi::SEC_E_UNSUPPORTED_FUNCTION as i32);
+               winerror::SEC_E_UNSUPPORTED_FUNCTION as i32);
 }
 
 #[test]
@@ -115,7 +113,7 @@ fn expired_cert() {
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
-    assert_eq!(err.raw_os_error().unwrap(), winapi::CERT_E_EXPIRED as i32);
+    assert_eq!(err.raw_os_error().unwrap(), winerror::CERT_E_EXPIRED as i32);
 }
 
 #[test]
@@ -131,7 +129,7 @@ fn self_signed_cert() {
         .unwrap();
     let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
-               winapi::CERT_E_UNTRUSTEDROOT as i32);
+               winerror::CERT_E_UNTRUSTEDROOT as i32);
 }
 
 #[test]
@@ -164,7 +162,7 @@ fn wrong_host_cert() {
         .unwrap();
     let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
-               winapi::CERT_E_CN_NO_MATCH as i32);
+               winerror::CERT_E_CN_NO_MATCH as i32);
 }
 
 #[test]
@@ -195,7 +193,7 @@ fn validation_failure_is_permanent() {
     stream.get_ref().set_nonblocking(false).unwrap();
     let err = unwrap_handshake(stream.handshake().err().unwrap());
     assert_eq!(err.raw_os_error().unwrap(),
-               winapi::CERT_E_UNTRUSTEDROOT as i32);
+               winerror::CERT_E_UNTRUSTEDROOT as i32);
 }
 
 #[test]
@@ -229,14 +227,14 @@ fn verify_callback_error() {
         .domain("google.com")
         .verify_callback(|validation_result| {
             assert!(validation_result.result().is_ok());
-            Err(io::Error::from_raw_os_error(winapi::CERT_E_UNTRUSTEDROOT))
+            Err(io::Error::from_raw_os_error(winerror::CERT_E_UNTRUSTEDROOT))
         })
         .connect(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
-               winapi::CERT_E_UNTRUSTEDROOT as i32);
+               winerror::CERT_E_UNTRUSTEDROOT as i32);
 }
 
 #[test]
@@ -250,21 +248,21 @@ fn verify_callback_gives_failed_cert() {
         .verify_callback(|validation_result| {
             let expected_finger = vec!(100, 20, 80, 217, 74, 101, 250, 235, 59, 99, 16, 40, 216, 232, 108, 149, 67, 29, 184, 17);
             assert_eq!(validation_result.failed_certificate().unwrap().fingerprint(HashAlgorithm::sha1()).unwrap(), expected_finger);
-            Err(io::Error::from_raw_os_error(winapi::CERT_E_UNTRUSTEDROOT))
+            Err(io::Error::from_raw_os_error(winerror::CERT_E_UNTRUSTEDROOT))
         })
         .connect(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
     assert_eq!(err.raw_os_error().unwrap(),
-               winapi::CERT_E_UNTRUSTEDROOT as i32);
+               winerror::CERT_E_UNTRUSTEDROOT as i32);
 }
 
 const FRIENDLY_NAME: &'static str = "schannel-rs localhost testing cert";
 
 lazy_static! {
     static ref szOID_RSA_SHA256RSA: Vec<u8> =
-        winapi::szOID_RSA_SHA256RSA.bytes().chain(Some(0)).collect();
+        wincrypt::szOID_RSA_SHA256RSA.bytes().chain(Some(0)).collect();
 }
 
 fn install_certificate() -> io::Result<CertContext> {
@@ -275,27 +273,27 @@ fn install_certificate() -> io::Result<CertContext> {
         let mut buffer = "schannel-rs test suite".encode_utf16()
                                                  .chain(Some(0))
                                                  .collect::<Vec<_>>();
-        let res = advapi32::CryptAcquireContextW(&mut provider,
+        let res = wincrypt::CryptAcquireContextW(&mut provider,
                                                  buffer.as_ptr(),
                                                  ptr::null_mut(),
-                                                 winapi::PROV_RSA_FULL,
-                                                 winapi::CRYPT_MACHINE_KEYSET);
+                                                 wincrypt::PROV_RSA_FULL,
+                                                 wincrypt::CRYPT_MACHINE_KEYSET);
         if res != winapi::TRUE {
             // create a new key container (since it does not exist)
-            let res = advapi32::CryptAcquireContextW(&mut provider,
+            let res = wincrypt::CryptAcquireContextW(&mut provider,
                                                      buffer.as_ptr(),
                                                      ptr::null_mut(),
-                                                     winapi::PROV_RSA_FULL,
-                                                     winapi::CRYPT_NEWKEYSET | winapi::CRYPT_MACHINE_KEYSET);
+                                                     wincrypt::PROV_RSA_FULL,
+                                                     wincrypt::CRYPT_NEWKEYSET | wincrypt::CRYPT_MACHINE_KEYSET);
             if res != winapi::TRUE {
                 return Err(Error::last_os_error())
             }
         }
 
         // create a new keypair (RSA-2048)
-        let res = advapi32::CryptGenKey(provider,
-                                        winapi::AT_SIGNATURE,
-                                        0x0800<<16 | winapi::CRYPT_EXPORTABLE,
+        let res = wincrypt::CryptGenKey(provider,
+                                        wincrypt::AT_SIGNATURE,
+                                        0x0800<<16 | wincrypt::CRYPT_EXPORTABLE,
                                         &mut hkey);
         if res != winapi::TRUE {
             return Err(Error::last_os_error());
@@ -305,41 +303,41 @@ fn install_certificate() -> io::Result<CertContext> {
         let name = "CN=localhost,O=schannel-rs,OU=schannel-rs,G=schannel_rs".encode_utf16()
                                                .chain(Some(0))
                                                .collect::<Vec<_>>();
-        let mut cname_buffer: [winapi::WCHAR; winapi::UNLEN as usize + 1] = mem::zeroed();
+        let mut cname_buffer: [ntdef::WCHAR; lmcons::UNLEN as usize + 1] = mem::zeroed();
         let mut cname_len = cname_buffer.len() as winapi::DWORD;
-        let res = crypt32::CertStrToNameW(winapi::X509_ASN_ENCODING,
-                                          name.as_ptr(),
-                                          winapi::CERT_X500_NAME_STR,
-                                          ptr::null_mut(),
-                                          cname_buffer.as_mut_ptr() as *mut u8,
-                                          &mut cname_len,
-                                          ptr::null_mut());
+        let res = wincrypt::CertStrToNameW(wincrypt::X509_ASN_ENCODING,
+                                           name.as_ptr(),
+                                           wincrypt::CERT_X500_NAME_STR,
+                                           ptr::null_mut(),
+                                           cname_buffer.as_mut_ptr() as *mut u8,
+                                           &mut cname_len,
+                                           ptr::null_mut());
         if res != winapi::TRUE {
             return Err(Error::last_os_error());
         }
 
-        let mut subject_issuer = winapi::CERT_NAME_BLOB {
+        let mut subject_issuer = wincrypt::CERT_NAME_BLOB {
             cbData: cname_len,
             pbData: cname_buffer.as_ptr() as *mut u8,
         };
-        let mut key_provider = winapi::CRYPT_KEY_PROV_INFO {
+        let mut key_provider = wincrypt::CRYPT_KEY_PROV_INFO {
             pwszContainerName: buffer.as_mut_ptr(),
             pwszProvName: ptr::null_mut(),
-            dwProvType: winapi::PROV_RSA_FULL,
-            dwFlags: winapi::CRYPT_MACHINE_KEYSET,
+            dwProvType: wincrypt::PROV_RSA_FULL,
+            dwFlags: wincrypt::CRYPT_MACHINE_KEYSET,
             cProvParam: 0,
             rgProvParam: ptr::null_mut(),
-            dwKeySpec: winapi::AT_SIGNATURE,
+            dwKeySpec: wincrypt::AT_SIGNATURE,
         };
-        let mut sig_algorithm = winapi::CRYPT_ALGORITHM_IDENTIFIER {
+        let mut sig_algorithm = wincrypt::CRYPT_ALGORITHM_IDENTIFIER {
             pszObjId: szOID_RSA_SHA256RSA.as_ptr() as *mut _,
             Parameters: mem::zeroed(),
         };
-        let mut expiration_date: winapi::SYSTEMTIME = mem::zeroed();
-        kernel32::GetSystemTime(&mut expiration_date);
+        let mut expiration_date: minwinbase::SYSTEMTIME = mem::zeroed();
+        sysinfoapi::GetSystemTime(&mut expiration_date);
         let mut file_time: winapi::FILETIME = mem::zeroed();
-        let res = kernel32::SystemTimeToFileTime(&mut expiration_date,
-                                                 &mut file_time);
+        let res = timezoneapi::SystemTimeToFileTime(&mut expiration_date,
+                                                    &mut file_time);
         if res != winapi::TRUE {
             return Err(Error::last_os_error());
         }
@@ -349,21 +347,21 @@ fn install_certificate() -> io::Result<CertContext> {
         timestamp += (1E9 as u64) / 100 * (60 * 60 * 24);
         file_time.dwLowDateTime = timestamp as u32;
         file_time.dwHighDateTime = (timestamp >> 32) as u32;
-        let res = kernel32::FileTimeToSystemTime(&file_time,
-                                                 &mut expiration_date);
+        let res = timezoneapi::FileTimeToSystemTime(&file_time,
+                                                    &mut expiration_date);
         if res != winapi::TRUE {
             return Err(Error::last_os_error());
         }
 
         // create a self signed certificate
-        let cert_context = crypt32::CertCreateSelfSignCertificate(0 as winapi::ULONG_PTR,
-                                                                  &mut subject_issuer,
-                                                                  0,
-                                                                  &mut key_provider,
-                                                                  &mut sig_algorithm,
-                                                                  ptr::null_mut(),
-                                                                  &mut expiration_date,
-                                                                  ptr::null_mut());
+        let cert_context = wincrypt::CertCreateSelfSignCertificate(0 as basetsd::ULONG_PTR,
+                                                                   &mut subject_issuer,
+                                                                   0,
+                                                                   &mut key_provider,
+                                                                   &mut sig_algorithm,
+                                                                   ptr::null_mut(),
+                                                                   &mut expiration_date,
+                                                                   ptr::null_mut());
         if cert_context.is_null() {
             return Err(Error::last_os_error());
         }
