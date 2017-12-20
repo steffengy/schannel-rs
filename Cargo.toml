@@ -8,15 +8,7 @@ documentation = "https://docs.rs/schannel/0/x86_64-pc-windows-gnu/schannel/"
 repository = "https://github.com/steffengy/schannel-rs"
 readme = "README.md"
 keywords = ["windows", "schannel", "tls", "ssl", "https"]
-build = "build.rs"
 
 [dependencies]
-advapi32-sys = "0.2"
-crypt32-sys = "0.2"
-kernel32-sys = "0.2"
 lazy_static = "1.0"
-secur32-sys="0.2"
-winapi = "0.2.8"
-
-[build-dependencies]
-winapi-build = "0.1"
+winapi = { version = "0.3", features = ["lmcons", "minschannel", "securitybaseapi", "schannel", "sysinfoapi", "timezoneapi", "winbase", "wincrypt", "winerror"] }

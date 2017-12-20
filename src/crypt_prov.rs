@@ -1,26 +1,25 @@
 //! CryptoAPI key providers.
-use advapi32;
-use crypt32;
-use kernel32;
 use std::io;
 use std::ptr;
-use winapi;
+use winapi::shared::minwindef as winapi;
+use winapi::um::winbase;
+use winapi::um::wincrypt;
 
 use Inner;
 use crypt_key::CryptKey;
 
 /// A CryptoAPI handle to a provider of a key.
-pub struct CryptProv(winapi::HCRYPTPROV);
+pub struct CryptProv(wincrypt::HCRYPTPROV);
 
 impl Drop for CryptProv {
     fn drop(&mut self) {
         unsafe {
-            advapi32::CryptReleaseContext(self.0, 0);
+            wincrypt::CryptReleaseContext(self.0, 0);
         }
     }
 }
 
-inner!(CryptProv, winapi::HCRYPTPROV);
+inner!(CryptProv, wincrypt::HCRYPTPROV);
 
 impl CryptProv {
     /// Imports a key into this provider.
@@ -65,23 +64,23 @@ impl AcquireOptions {
 
     /// If set, private keys will not be accessible or persisted.
     pub fn verify_context(&mut self, verify_context: bool) -> &mut AcquireOptions {
-        self.flag(winapi::CRYPT_VERIFYCONTEXT, verify_context)
+        self.flag(wincrypt::CRYPT_VERIFYCONTEXT, verify_context)
     }
 
     /// If set, the container will be created.
     pub fn new_keyset(&mut self, new_keyset: bool) -> &mut AcquireOptions {
-        self.flag(winapi::CRYPT_NEWKEYSET, new_keyset)
+        self.flag(wincrypt::CRYPT_NEWKEYSET, new_keyset)
     }
 
     /// If set, the container will be stored as a machine rather than user keys.
     pub fn machine_keyset(&mut self, machine_keyset: bool) -> &mut AcquireOptions {
-        self.flag(winapi::CRYPT_MACHINE_KEYSET, machine_keyset)
+        self.flag(wincrypt::CRYPT_MACHINE_KEYSET, machine_keyset)
     }
 
     /// If set, an error will be returned if user intervention is required
     /// rather than displaying a dialog.
     pub fn silent(&mut self, silent: bool) -> &mut AcquireOptions {
-        self.flag(winapi::CRYPT_SILENT, silent)
+        self.flag(wincrypt::CRYPT_SILENT, silent)
     }
 
     fn flag(&mut self, flag: winapi::DWORD, on: bool) -> &mut AcquireOptions {
@@ -101,7 +100,7 @@ impl AcquireOptions {
             let provider = self.provider.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null());
 
             let mut prov = 0;
-            let res = advapi32::CryptAcquireContextW(&mut prov,
+            let res = wincrypt::CryptAcquireContextW(&mut prov,
                                                      container as *mut _,
                                                      provider as *mut _,
                                                      type_.0,
@@ -123,43 +122,43 @@ pub struct ProviderType(winapi::DWORD);
 #[allow(missing_docs)]
 impl ProviderType {
     pub fn rsa_full() -> ProviderType {
-        ProviderType(winapi::PROV_RSA_FULL)
+        ProviderType(wincrypt::PROV_RSA_FULL)
     }
 
     pub fn rsa_aes() -> ProviderType {
-        ProviderType(winapi::PROV_RSA_AES)
+        ProviderType(wincrypt::PROV_RSA_AES)
     }
 
     pub fn rsa_sig() -> ProviderType {
-        ProviderType(winapi::PROV_RSA_SIG)
+        ProviderType(wincrypt::PROV_RSA_SIG)
     }
 
     pub fn rsa_schannel() -> ProviderType {
-        ProviderType(winapi::PROV_RSA_SCHANNEL)
+        ProviderType(wincrypt::PROV_RSA_SCHANNEL)
     }
 
     pub fn dss() -> ProviderType {
-        ProviderType(winapi::PROV_DSS)
+        ProviderType(wincrypt::PROV_DSS)
     }
 
     pub fn dss_dh() -> ProviderType {
-        ProviderType(winapi::PROV_DSS_DH)
+        ProviderType(wincrypt::PROV_DSS_DH)
     }
 
     pub fn dh_schannel() -> ProviderType {
-        ProviderType(winapi::PROV_DH_SCHANNEL)
+        ProviderType(wincrypt::PROV_DH_SCHANNEL)
     }
 
     pub fn fortezza() -> ProviderType {
-        ProviderType(winapi::PROV_FORTEZZA)
+        ProviderType(wincrypt::PROV_FORTEZZA)
     }
 
     pub fn ms_exchange() -> ProviderType {
-        ProviderType(winapi::PROV_MS_EXCHANGE)
+        ProviderType(wincrypt::PROV_MS_EXCHANGE)
     }
 
     pub fn ssl() -> ProviderType {
-        ProviderType(winapi::PROV_SSL)
+        ProviderType(wincrypt::PROV_SSL)
     }
 
     pub fn as_raw(&self) -> winapi::DWORD {
@@ -180,22 +179,22 @@ impl<'a> ImportOptions<'a> {
             assert!(der.len() <= winapi::DWORD::max_value() as usize);
             let mut buf = ptr::null_mut();
             let mut len = 0;
-            let res = crypt32::CryptDecodeObjectEx(winapi::X509_ASN_ENCODING |
-                                                   winapi::PKCS_7_ASN_ENCODING,
-                                                   winapi::PKCS_RSA_PRIVATE_KEY,
-                                                   der.as_ptr(),
-                                                   der.len() as winapi::DWORD,
-                                                   winapi::CRYPT_DECODE_ALLOC_FLAG,
-                                                   ptr::null_mut(),
-                                                   &mut buf as *mut _ as *mut winapi::c_void,
-                                                   &mut len);
+            let res = wincrypt::CryptDecodeObjectEx(wincrypt::X509_ASN_ENCODING |
+                                                    wincrypt::PKCS_7_ASN_ENCODING,
+                                                    wincrypt::PKCS_RSA_PRIVATE_KEY,
+                                                    der.as_ptr(),
+                                                    der.len() as winapi::DWORD,
+                                                    wincrypt::CRYPT_DECODE_ALLOC_FLAG,
+                                                    ptr::null_mut(),
+                                                    &mut buf as *mut _ as winapi::LPVOID,
+                                                    &mut len);
             if res == winapi::FALSE {
                 return Err(io::Error::last_os_error());
             }
 
             let mut key = 0;
-            let res = advapi32::CryptImportKey(self.prov.0, buf, len, 0, self.flags, &mut key);
-            kernel32::LocalFree(buf as *mut _);
+            let res = wincrypt::CryptImportKey(self.prov.0, buf, len, 0, self.flags, &mut key);
+            winbase::LocalFree(buf as *mut _);
 
             if res == winapi::TRUE {
                 Ok(CryptKey::from_inner(key))

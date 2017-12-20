@@ -2,14 +2,13 @@
 
 use std::mem;
 use std::slice;
-use crypt32;
-use winapi;
+use winapi::um::wincrypt;
 
 use cert_context::CertContext;
 use Inner;
 
 /// A certificate chain context (consisting of multiple chains)
-pub struct CertChainContext(pub winapi::PCERT_CHAIN_CONTEXT);
+pub struct CertChainContext(pub wincrypt::PCERT_CHAIN_CONTEXT);
 
 unsafe impl Sync for CertChainContext {}
 unsafe impl Send for CertChainContext {}
@@ -17,7 +16,7 @@ unsafe impl Send for CertChainContext {}
 impl Clone for CertChainContext {
     fn clone(&self) -> Self {
         let rced = unsafe {
-            crypt32::CertDuplicateCertificateChain(self.0) as *mut _
+            wincrypt::CertDuplicateCertificateChain(self.0) as *mut _
         };
         CertChainContext(rced)
     }
@@ -26,7 +25,7 @@ impl Clone for CertChainContext {
 impl Drop for CertChainContext {
     fn drop(&mut self) {
         unsafe {
-            crypt32::CertFreeCertificateChain(self.0);
+            wincrypt::CertFreeCertificateChain(self.0);
         }
     }
 }
@@ -51,7 +50,7 @@ impl CertChainContext {
                 None
             } else {
                 let chain_slice = slice::from_raw_parts(
-                    cert_chain.rgpChain as *mut winapi::PCERT_SIMPLE_CHAIN,
+                    cert_chain.rgpChain as *mut wincrypt::PCERT_SIMPLE_CHAIN,
                     cert_chain.cChain as usize);
                 Some(CertChain(chain_slice[index], self.clone()))
             }
@@ -69,7 +68,7 @@ impl CertChainContext {
 }
 
 /// A (simple) certificate chain
-pub struct CertChain(winapi::PCERT_SIMPLE_CHAIN, CertChainContext);
+pub struct CertChain(wincrypt::PCERT_SIMPLE_CHAIN, CertChainContext);
 
 impl CertChain {
     /// Returns the number of certificates in the chain
@@ -84,7 +83,7 @@ impl CertChain {
         let elements = unsafe {
             let cert_chain = *self.0;
             slice::from_raw_parts(
-                cert_chain.rgpElement as *mut &mut winapi::CERT_CHAIN_ELEMENT,
+                cert_chain.rgpElement as *mut &mut wincrypt::CERT_CHAIN_ELEMENT,
                 cert_chain.cElement as usize)
         };
         elements.get(idx).map(|el| {

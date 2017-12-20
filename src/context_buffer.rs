@@ -1,14 +1,13 @@
-use winapi;
-use secur32;
+use winapi::shared::sspi;
 use std::ops::Deref;
 use std::slice;
 
-pub struct ContextBuffer(pub winapi::SecBuffer);
+pub struct ContextBuffer(pub sspi::SecBuffer);
 
 impl Drop for ContextBuffer {
     fn drop(&mut self) {
         unsafe {
-            secur32::FreeContextBuffer(self.0.pvBuffer);
+            sspi::FreeContextBuffer(self.0.pvBuffer);
         }
     }
 }

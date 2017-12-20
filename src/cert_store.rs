@@ -1,6 +1,5 @@
 //! Bindings to winapi's certificate-store related APIs.
 
-use crypt32;
 use std::cmp;
 use std::ffi::OsStr;
 use std::fmt;
@@ -8,19 +7,17 @@ use std::io;
 use std::mem;
 use std::os::windows::prelude::*;
 use std::ptr;
-use winapi;
+use winapi::shared::minwindef as winapi;
+use winapi::shared::ntdef;
+use winapi::um::wincrypt;
 
 use cert_context::CertContext;
 use ctl_context::CtlContext;
 
 use Inner;
 
-// FIXME https://github.com/retep998/winapi-rs/pull/318
-const PKCS12_INCLUDE_EXTENDED_PROPERTIES: winapi::DWORD = 0x10;
-const PKCS12_NO_PERSIST_KEY: winapi::DWORD = 0x8000;
-
 /// Representation of certificate store on Windows, wrapping a `HCERTSTORE`.
-pub struct CertStore(winapi::HCERTSTORE);
+pub struct CertStore(wincrypt::HCERTSTORE);
 
 unsafe impl Sync for CertStore {}
 unsafe impl Send for CertStore {}
@@ -34,18 +31,18 @@ impl fmt::Debug for CertStore {
 impl Drop for CertStore {
     fn drop(&mut self) {
         unsafe {
-            crypt32::CertCloseStore(self.0, 0);
+            wincrypt::CertCloseStore(self.0, 0);
         }
     }
 }
 
 impl Clone for CertStore {
     fn clone(&self) -> CertStore {
-        unsafe { CertStore(crypt32::CertDuplicateStore(self.0)) }
+        unsafe { CertStore(wincrypt::CertDuplicateStore(self.0)) }
     }
 }
 
-inner!(CertStore, winapi::HCERTSTORE);
+inner!(CertStore, wincrypt::HCERTSTORE);
 
 /// Argument to the `add_cert` function indicating how a certificate should be
 /// added to a `CertStore`.
@@ -53,11 +50,11 @@ pub enum CertAdd {
     /// The function makes no check for an existing matching certificate or link
     /// to a matching certificate. A new certificate is always added to the
     /// store. This can lead to duplicates in a store.
-    Always = winapi::CERT_STORE_ADD_ALWAYS as isize,
+    Always = wincrypt::CERT_STORE_ADD_ALWAYS as isize,
 
     /// If a matching certificate or a link to a matching certificate exists,
     /// the operation fails.
-    New = winapi::CERT_STORE_ADD_NEW as isize,
+    New = wincrypt::CERT_STORE_ADD_NEW as isize,
 
     /// If a matching certificate or a link to a matching certificate exists and
     /// the NotBefore time of the existing context is equal to or greater than
@@ -68,7 +65,7 @@ pub enum CertAdd {
     /// deleted and a new certificate is created and added to the store. If a
     /// matching certificate or a link to a matching certificate does not exist,
     /// a new link is added.
-    Newer = winapi::CERT_STORE_ADD_NEWER as isize,
+    Newer = wincrypt::CERT_STORE_ADD_NEWER as isize,
 
     /// If a matching certificate or a link to a matching certificate exists and
     /// the NotBefore time of the existing context is equal to or greater than
@@ -78,19 +75,19 @@ pub enum CertAdd {
     /// time of the new context being added, the existing context is deleted
     /// before creating and adding the new context. The new added context
     /// inherits properties from the existing certificate.
-    NewerInheritProperties = winapi::CERT_STORE_ADD_NEWER_INHERIT_PROPERTIES as isize,
+    NewerInheritProperties = wincrypt::CERT_STORE_ADD_NEWER_INHERIT_PROPERTIES as isize,
 
     /// If a link to a matching certificate exists, that existing certificate or
     /// link is deleted and a new certificate is created and added to the store.
     /// If a matching certificate or a link to a matching certificate does not
     /// exist, a new link is added.
-    ReplaceExisting = winapi::CERT_STORE_ADD_REPLACE_EXISTING as isize,
+    ReplaceExisting = wincrypt::CERT_STORE_ADD_REPLACE_EXISTING as isize,
 
     /// If a matching certificate exists in the store, the existing context is
     /// not replaced. The existing context inherits properties from the new
     /// certificate.
     ReplaceExistingInheritProperties =
-        winapi::CERT_STORE_ADD_REPLACE_EXISTING_INHERIT_PROPERTIES as isize,
+        wincrypt::CERT_STORE_ADD_REPLACE_EXISTING_INHERIT_PROPERTIES as isize,
 
     /// If a matching certificate or a link to a matching certificate exists,
     /// that existing certificate or link is used and properties from the
@@ -99,7 +96,7 @@ pub enum CertAdd {
     ///
     /// If a matching certificate or a link to a matching certificate does
     /// not exist, a new certificate is added.
-    UseExisting = winapi::CERT_STORE_ADD_USE_EXISTING as isize,
+    UseExisting = wincrypt::CERT_STORE_ADD_USE_EXISTING as isize,
 }
 
 impl CertStore {
@@ -112,11 +109,11 @@ impl CertStore {
                              .encode_wide()
                              .chain(Some(0))
                              .collect::<Vec<_>>();
-            let store = crypt32::CertOpenStore(winapi::CERT_STORE_PROV_SYSTEM_W as winapi::LPCSTR,
-                                               0,
-                                               0,
-                                               winapi::CERT_SYSTEM_STORE_CURRENT_USER,
-                                               data.as_ptr() as *mut _);
+            let store = wincrypt::CertOpenStore(wincrypt::CERT_STORE_PROV_SYSTEM_W as ntdef::LPCSTR,
+                                                0,
+                                                0,
+                                                wincrypt::CERT_SYSTEM_STORE_CURRENT_USER,
+                                                data.as_ptr() as *mut _);
             if store.is_null() {
                 Err(io::Error::last_os_error())
             } else {
@@ -135,11 +132,11 @@ impl CertStore {
                              .encode_wide()
                              .chain(Some(0))
                              .collect::<Vec<_>>();
-            let store = crypt32::CertOpenStore(winapi::CERT_STORE_PROV_SYSTEM_W as winapi::LPCSTR,
-                                               0,
-                                               0,
-                                               winapi::CERT_SYSTEM_STORE_LOCAL_MACHINE,
-                                               data.as_ptr() as *mut _);
+            let store = wincrypt::CertOpenStore(wincrypt::CERT_STORE_PROV_SYSTEM_W as ntdef::LPCSTR,
+                                                0,
+                                                0,
+                                                wincrypt::CERT_SYSTEM_STORE_LOCAL_MACHINE,
+                                                data.as_ptr() as *mut _);
             if store.is_null() {
                 Err(io::Error::last_os_error())
             } else {
@@ -156,7 +153,7 @@ impl CertStore {
                          password: Option<&str>)
                          -> io::Result<CertStore> {
         unsafe {
-            let mut blob = winapi::CRYPT_INTEGER_BLOB {
+            let mut blob = wincrypt::CRYPT_INTEGER_BLOB {
                 cbData: data.len() as winapi::DWORD,
                 pbData: data.as_ptr() as *mut u8,
             };
@@ -167,9 +164,9 @@ impl CertStore {
             });
             let password = password.as_ref().map(|s| s.as_ptr());
             let password = password.unwrap_or(ptr::null());
-            let res = crypt32::PFXImportCertStore(&mut blob,
-                                                  password,
-                                                  0);
+            let res = wincrypt::PFXImportCertStore(&mut blob,
+                                                   password,
+                                                   0);
             if res.is_null() {
                 Err(io::Error::last_os_error())
             } else {
@@ -193,10 +190,10 @@ impl CertStore {
         unsafe {
             let how = how as winapi::DWORD;
             let mut ret = ptr::null();
-            let res = crypt32::CertAddCertificateContextToStore(self.0,
-                                                                cx.as_inner(),
-                                                                how,
-                                                                &mut ret);
+            let res = wincrypt::CertAddCertificateContextToStore(self.0,
+                                                                 cx.as_inner(),
+                                                                 how,
+                                                                 &mut ret);
             if res != winapi::TRUE {
                 Err(io::Error::last_os_error())
             } else {
@@ -210,27 +207,25 @@ impl CertStore {
     /// The password specified will be the password used to unlock the returned
     /// data.
     pub fn export_pkcs12(&self, password: &str) -> io::Result<Vec<u8>> {
-        const EXPORT_PRIVATE_KEYS: winapi::DWORD = 0x4;
-
         unsafe {
             let password = password.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
-            let mut blob = winapi::CRYPT_DATA_BLOB {
+            let mut blob = wincrypt::CRYPT_DATA_BLOB {
                 cbData: 0,
                 pbData: 0 as *mut _,
             };
-            let res = crypt32::PFXExportCertStore(self.0,
-                                                  &mut blob,
-                                                  password.as_ptr(),
-                                                  EXPORT_PRIVATE_KEYS);
+            let res = wincrypt::PFXExportCertStore(self.0,
+                                                   &mut blob,
+                                                   password.as_ptr(),
+                                                   wincrypt::EXPORT_PRIVATE_KEYS);
             if res != winapi::TRUE {
                 return Err(io::Error::last_os_error())
             }
             let mut ret = Vec::with_capacity(blob.cbData as usize);
             blob.pbData = ret.as_mut_ptr();
-            let res = crypt32::PFXExportCertStore(self.0,
-                                                  &mut blob,
-                                                  password.as_ptr(),
-                                                  EXPORT_PRIVATE_KEYS);
+            let res = wincrypt::PFXExportCertStore(self.0,
+                                                   &mut blob,
+                                                   password.as_ptr(),
+                                                   wincrypt::EXPORT_PRIVATE_KEYS);
             if res != winapi::TRUE {
                 return Err(io::Error::last_os_error())
             }
@@ -258,7 +253,7 @@ impl<'a> Iterator for Certs<'a> {
                 ptr
             });
             let cur = cur.unwrap_or(ptr::null_mut());
-            let next = crypt32::CertEnumCertificatesInStore(self.store.0, cur);
+            let next = wincrypt::CertEnumCertificatesInStore(self.store.0, cur);
 
             if next.is_null() {
                 self.cur = None;
@@ -295,14 +290,14 @@ impl PfxImportOptions {
     ///
     /// If not set, private keys are persisted on disk and must be manually deleted.
     pub fn no_persist_key(&mut self, no_persist_key: bool) -> &mut PfxImportOptions {
-        self.flag(PKCS12_NO_PERSIST_KEY, no_persist_key)
+        self.flag(wincrypt::PKCS12_NO_PERSIST_KEY, no_persist_key)
     }
 
     /// If set, all extended properties of the certificate will be imported.
     pub fn include_extended_properties(&mut self,
                                        include_extended_properties: bool)
                                        -> &mut PfxImportOptions {
-        self.flag(PKCS12_INCLUDE_EXTENDED_PROPERTIES, include_extended_properties)
+        self.flag(wincrypt::PKCS12_INCLUDE_EXTENDED_PROPERTIES, include_extended_properties)
     }
 
     fn flag(&mut self, flag: winapi::DWORD, set: bool) -> &mut PfxImportOptions {
@@ -317,13 +312,13 @@ impl PfxImportOptions {
     /// Imports certificates from a PKCS #12 archive, returning a `CertStore` containing them.
     pub fn import(&self, data: &[u8]) -> io::Result<CertStore> {
         unsafe {
-            let mut blob = winapi::CRYPT_DATA_BLOB {
+            let mut blob = wincrypt::CRYPT_DATA_BLOB {
                 cbData: cmp::min(data.len(), winapi::DWORD::max_value() as usize) as winapi::DWORD,
                 pbData: data.as_ptr() as *const _ as *mut _,
             };
             let password = self.password.as_ref().map_or(ptr::null(), |p| p.as_ptr());
 
-            let store = crypt32::PFXImportCertStore(&mut blob, password, self.flags);
+            let store = wincrypt::PFXImportCertStore(&mut blob, password, self.flags);
             if store.is_null() {
                 return Err(io::Error::last_os_error());
             }
@@ -344,11 +339,11 @@ impl Memory {
     /// Initially the returned certificate store contains no certificates.
     pub fn new() -> io::Result<Memory> {
         unsafe {
-            let store = crypt32::CertOpenStore(winapi::CERT_STORE_PROV_MEMORY as winapi::LPCSTR,
-                                               0,
-                                               0,
-                                               0,
-                                               ptr::null_mut());
+            let store = wincrypt::CertOpenStore(wincrypt::CERT_STORE_PROV_MEMORY as ntdef::LPCSTR,
+                                                0,
+                                                0,
+                                                0,
+                                                ptr::null_mut());
             if store.is_null() {
                 Err(io::Error::last_os_error())
             } else {
@@ -364,13 +359,13 @@ impl Memory {
         unsafe {
             let mut cert_context = ptr::null();
 
-            let res = crypt32::CertAddEncodedCertificateToStore((self.0).0,
-                                                                winapi::X509_ASN_ENCODING |
-                                                                winapi::PKCS_7_ASN_ENCODING,
-                                                                cert.as_ptr() as *const _,
-                                                                cert.len() as winapi::DWORD,
-                                                                winapi::CERT_STORE_ADD_ALWAYS,
-                                                                &mut cert_context);
+            let res = wincrypt::CertAddEncodedCertificateToStore((self.0).0,
+                                                                 wincrypt::X509_ASN_ENCODING |
+                                                                 wincrypt::PKCS_7_ASN_ENCODING,
+                                                                 cert.as_ptr() as *const _,
+                                                                 cert.len() as winapi::DWORD,
+                                                                 wincrypt::CERT_STORE_ADD_ALWAYS,
+                                                                 &mut cert_context);
             if res == winapi::TRUE {
                 Ok(CertContext::from_inner(cert_context))
             } else {
@@ -386,13 +381,13 @@ impl Memory {
         unsafe {
             let mut ctl_context = ptr::null();
 
-            let res = crypt32::CertAddEncodedCTLToStore((self.0).0,
-                                                        winapi::X509_ASN_ENCODING |
-                                                        winapi::PKCS_7_ASN_ENCODING,
-                                                        ctl.as_ptr() as *const _,
-                                                        ctl.len() as winapi::DWORD,
-                                                        winapi::CERT_STORE_ADD_ALWAYS,
-                                                        &mut ctl_context);
+            let res = wincrypt::CertAddEncodedCTLToStore((self.0).0,
+                                                         wincrypt::X509_ASN_ENCODING |
+                                                         wincrypt::PKCS_7_ASN_ENCODING,
+                                                         ctl.as_ptr() as *const _,
+                                                         ctl.len() as winapi::DWORD,
+                                                         wincrypt::CERT_STORE_ADD_ALWAYS,
+                                                         &mut ctl_context);
             if res == winapi::TRUE {
                 Ok(CtlContext::from_inner(ctl_context))
             } else {
