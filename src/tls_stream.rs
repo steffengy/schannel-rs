@@ -12,6 +12,8 @@ use std::slice;
 use std::sync::Arc;
 use winapi;
 
+
+use cert_context::{KeySpec, HashAlgorithm};
 use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
 use cert_chain::{CertChain, CertChainContext};
 use cert_store::CertStore;
@@ -532,10 +534,7 @@ impl<S> TlsStream<S>
         };
 
         let cert_chain = unsafe {
-            let cert_store = self.cert_store
-                .as_ref()
-                .map(|s| s.as_inner())
-                .unwrap_or(ptr::null_mut());
+            let cert_store = (*cert_context.0).hCertStore;
 
             let flags = winapi::CERT_CHAIN_CACHE_END_CERT |
                         winapi::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY |
@@ -548,6 +547,7 @@ impl<S> TlsStream<S>
             let mut identifiers = [szOID_PKIX_KP_SERVER_AUTH.as_ptr() as winapi::LPSTR,
                                    szOID_SERVER_GATED_CRYPTO.as_ptr() as winapi::LPSTR,
                                    szOID_SGC_NETSCAPE.as_ptr() as winapi::LPSTR];
+
             para.RequestedUsage.Usage.cUsageIdentifier = identifiers.len() as winapi::DWORD;
             para.RequestedUsage.Usage.rgpszUsageIdentifier = identifiers.as_mut_ptr();
 
