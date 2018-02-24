@@ -176,7 +176,7 @@ impl CertStore {
     }
 
     /// Returns an iterator over the certificates in this certificate store.
-    pub fn certs(&mut self) -> Certs {
+    pub fn certs(&self) -> Certs {
         Certs { store: self, cur: None }
     }
 
@@ -238,7 +238,7 @@ impl CertStore {
 /// An iterator over the certificates contained in a `CertStore`, returned by
 /// `CertStore::iter`
 pub struct Certs<'a> {
-    store: &'a mut CertStore,
+    store: &'a CertStore,
     cur: Option<CertContext>,
 }
 
@@ -430,7 +430,7 @@ mod test {
     #[test]
     fn pfx_import() {
         let pfx = include_bytes!("../test/identity.p12");
-        let mut store = PfxImportOptions::new()
+        let store = PfxImportOptions::new()
                         .include_extended_properties(true)
                         .password("mypass")
                         .import(pfx)
