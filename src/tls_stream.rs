@@ -14,7 +14,7 @@ use winapi::um::{self, wincrypt};
 
 use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
 use cert_chain::{CertChain, CertChainContext};
-use cert_store::CertStore;
+use cert_store::{CertAdd, CertStore};
 use cert_context::CertContext;
 use security_context::SecurityContext;
 use context_buffer::ContextBuffer;
@@ -527,10 +527,17 @@ impl<S> TlsStream<S>
         };
 
         let cert_chain = unsafe {
-            let cert_store = self.cert_store
-                .as_ref()
-                .map(|s| s.as_inner())
-                .unwrap_or(ptr::null_mut());
+            let cert_store = match (cert_context.cert_store(), &self.cert_store) {
+                (Some(ref mut chain_certs), &Some(ref extra_certs)) => {
+                    for extra_cert in extra_certs.certs() {
+                        chain_certs.add_cert(&extra_cert, CertAdd::ReplaceExisting)?;
+                    }
+                    chain_certs.as_inner()
+                },
+                (Some(chain_certs), &None) => chain_certs.as_inner(),
+                (None, &Some(ref extra_certs)) => extra_certs.as_inner(),
+                (None, &None) => ptr::null_mut()
+            };
 
             let flags = wincrypt::CERT_CHAIN_CACHE_END_CERT |
                         wincrypt::CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY |
