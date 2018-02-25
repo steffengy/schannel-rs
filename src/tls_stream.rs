@@ -530,7 +530,7 @@ impl<S> TlsStream<S>
             let cert_store = match (cert_context.cert_store(), &self.cert_store) {
                 (Some(ref mut chain_certs), &Some(ref extra_certs)) => {
                     for extra_cert in extra_certs.certs() {
-                        chain_certs.add_cert(&extra_cert, CertAdd::ReplaceExisting)?;
+                        try!(chain_certs.add_cert(&extra_cert, CertAdd::ReplaceExisting));
                     }
                     chain_certs.as_inner()
                 },
