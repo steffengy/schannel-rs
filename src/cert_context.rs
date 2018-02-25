@@ -14,6 +14,7 @@ use winapi::um::wincrypt;
 use Inner;
 use ncrypt_key::NcryptKey;
 use crypt_prov::{CryptProv, ProviderType};
+use cert_store::CertStore;
 
 /// A supported hashing algorithm
 pub struct HashAlgorithm(winapi::DWORD, usize);
@@ -296,6 +297,19 @@ impl CertContext {
                 );
             }
             Ok(ValidUses::Oids(oids))
+        }
+    }
+
+    /// For a remote certificate, returns a certificate store containing any intermediate
+    /// certificates provided by the remote sender.
+    pub fn cert_store(&self) -> Option<CertStore> {
+        unsafe {
+            let chain = (*self.0).hCertStore;
+            if chain.is_null() {
+                None
+            } else {
+                Some(CertStore::from_inner(wincrypt::CertDuplicateStore(chain)))
+            }
         }
     }
 
