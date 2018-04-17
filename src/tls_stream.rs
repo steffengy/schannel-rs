@@ -30,11 +30,24 @@ lazy_static! {
 }
 
 /// A builder type for `TlsStream`s.
-#[derive(Default)]
 pub struct Builder {
     domain: Option<Vec<u16>>,
+    use_sni: bool,
+    accept_invalid_hostnames: bool,
     verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     cert_store: Option<CertStore>,
+}
+
+impl Default for Builder {
+    fn default() -> Builder {
+        Builder {
+            domain: None,
+            use_sni: true,
+            accept_invalid_hostnames: false,
+            verify_callback: None,
+            cert_store: None,
+        }
+    }
 }
 
 impl Builder {
@@ -49,6 +62,22 @@ impl Builder {
     /// certificate validation.
     pub fn domain(&mut self, domain: &str) -> &mut Builder {
         self.domain = Some(domain.encode_utf16().chain(Some(0)).collect());
+        self
+    }
+
+    /// Determines if Server Name Indication (SNI) will be used.
+    ///
+    /// Defaults to `true`.
+    pub fn use_sni(&mut self, use_sni: bool) -> &mut Builder {
+        self.use_sni = use_sni;
+        self
+    }
+
+    /// Determines if the server's hostname will be checked during certificate verification.
+    ///
+    /// Defaults to `false`.
+    pub fn accept_invalid_hostnames(&mut self, accept_invalid_hostnames: bool) -> &mut Builder {
+        self.accept_invalid_hostnames = accept_invalid_hostnames;
         self
     }
 
@@ -123,7 +152,10 @@ impl Builder {
                          -> Result<TlsStream<S>, HandshakeError<S>>
         where S: Read + Write
     {
-        let domain = self.domain.as_ref().map(|s| &s[..]);
+        let domain = match self.domain {
+            Some(ref domain) if self.use_sni => Some(&domain[..]),
+            _ => None,
+        };
         let (ctxt, buf) = match SecurityContext::initialize(&mut cred,
                                                             accept,
                                                             domain) {
@@ -136,6 +168,8 @@ impl Builder {
             context: ctxt,
             cert_store: self.cert_store.clone(),
             domain: self.domain.clone(),
+            use_sni: self.use_sni,
+            accept_invalid_hostnames: self.accept_invalid_hostnames,
             verify_callback: self.verify_callback.clone(),
             stream: stream,
             accept: accept,
@@ -176,6 +210,8 @@ pub struct TlsStream<S> {
     context: SecurityContext,
     cert_store: Option<CertStore>,
     domain: Option<Vec<u16>>,
+    use_sni: bool,
+    accept_invalid_hostnames: bool,
     verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     stream: S,
     state: State,
@@ -369,10 +405,10 @@ impl<S> TlsStream<S>
                                             &mut attributes,
                                             ptr::null_mut())
             } else {
-                let domain = self.domain
-                    .as_ref()
-                    .map(|b| b.as_ptr() as *mut u16)
-                    .unwrap_or(ptr::null_mut());
+                let domain = match self.domain {
+                    Some(ref domain) if self.use_sni => domain.as_ptr() as *mut u16,
+                    _ => ptr::null_mut(),
+                };
 
                 sspi::InitializeSecurityContextW(self.cred.get_mut(),
                                                  self.context.get_mut(),
@@ -586,8 +622,11 @@ impl<S> TlsStream<S>
             let mut extra_para: wincrypt::SSL_EXTRA_CERT_CHAIN_POLICY_PARA = mem::zeroed();
             *extra_para.u.cbSize_mut() = mem::size_of_val(&extra_para) as winapi::DWORD;
             extra_para.dwAuthType = wincrypt::AUTHTYPE_SERVER;
-            if let Some(ref mut name) = self.domain {
-                extra_para.pwszServerName = name.as_mut_ptr();
+            match self.domain {
+                Some(ref mut domain) if !self.accept_invalid_hostnames => {
+                    extra_para.pwszServerName = domain.as_mut_ptr();
+                }
+                _ => {}
             }
 
             let mut para: wincrypt::CERT_CHAIN_POLICY_PARA = mem::zeroed();

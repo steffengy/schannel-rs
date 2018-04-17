@@ -184,6 +184,19 @@ fn wrong_host_cert() {
 }
 
 #[test]
+fn wrong_host_cert_ignored() {
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("wrong.host.badssl.com:443").unwrap();
+    tls_stream::Builder::new()
+        .domain("wrong.host.badssl.com")
+        .accept_invalid_hostnames(true)
+        .connect(creds, stream)
+        .unwrap();
+}
+
+#[test]
 fn shutdown() {
     let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
