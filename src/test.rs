@@ -653,3 +653,19 @@ fn split_cert_key() {
 
     t.join().unwrap();
 }
+
+#[test]
+fn test_alpn() {
+    let creds = SchannelCred::builder()
+        .enabled_protocols(&[Protocol::Tls12])
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("google.com:443").unwrap();
+    let mut stream = tls_stream::Builder::new()
+        .domain("google.com")
+        .request_application_protocols(vec![b"h2".to_vec()])
+        .connect(creds, stream)
+        .unwrap();
+    assert_eq!(stream.get_negotiated_application_protocol(),Some(b"h2".to_vec()));
+    //TODO: close the connection nicely
+}

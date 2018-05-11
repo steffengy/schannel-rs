@@ -4,7 +4,7 @@ use std::mem;
 use std::ptr;
 use std::io;
 
-use {INIT_REQUESTS, Inner, secbuf, secbuf_desc};
+use {INIT_REQUESTS, Inner, alpn_list, secbuf, secbuf_desc};
 use cert_context::CertContext;
 use context_buffer::ContextBuffer;
 
@@ -37,10 +37,25 @@ impl Inner<sspi::CtxtHandle> for SecurityContext {
 impl SecurityContext {
     pub fn initialize(cred: &mut SchannelCred,
                       accept: bool,
-                      domain: Option<&[u16]>)
+                      domain: Option<&[u16]>,
+                      requested_application_protocols: &Option<Vec<Vec<u8>>>)
                       -> io::Result<(SecurityContext, Option<ContextBuffer>)> {
         unsafe {
             let mut ctxt = mem::zeroed();
+
+            let mut inbufs = vec![];
+
+            if let Some(ref alpns) = requested_application_protocols{
+                let mut alpns = alpn_list(&alpns);
+                inbufs.push(
+                    secbuf(
+                        sspi::SECBUFFER_APPLICATION_PROTOCOLS,
+                        Some(&mut alpns[..]),
+                    )
+                );
+            }
+
+            let mut inbuf_desc = secbuf_desc(&mut inbufs[..]);
 
             if accept {
                 // If we're performing an accept then we need to wait to call
@@ -61,7 +76,7 @@ impl SecurityContext {
                                                    INIT_REQUESTS,
                                                    0,
                                                    0,
-                                                   ptr::null_mut(),
+                                                   &mut inbuf_desc,
                                                    0,
                                                    &mut ctxt,
                                                    &mut outbuf_desc,

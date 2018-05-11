@@ -8,11 +8,12 @@ use std::mem;
 use std::ptr;
 use std::slice;
 use std::sync::Arc;
+use winapi::ctypes;
 use winapi::shared::minwindef as winapi;
 use winapi::shared::{ntdef, sspi, winerror};
 use winapi::um::{self, wincrypt};
 
-use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
+use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, alpn_list, secbuf, secbuf_desc};
 use cert_chain::{CertChain, CertChainContext};
 use cert_store::{CertAdd, CertStore};
 use cert_context::CertContext;
@@ -36,6 +37,7 @@ pub struct Builder {
     accept_invalid_hostnames: bool,
     verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     cert_store: Option<CertStore>,
+    requested_application_protocols: Option<Vec<Vec<u8>>>,
 }
 
 impl Default for Builder {
@@ -46,6 +48,7 @@ impl Default for Builder {
             accept_invalid_hostnames: false,
             verify_callback: None,
             cert_store: None,
+            requested_application_protocols: None,
         }
     }
 }
@@ -108,6 +111,12 @@ impl Builder {
         self
     }
 
+    /// Requests one of a set of application protocols using alpn
+    pub fn request_application_protocols(&mut self, request_application_protocols: Vec<Vec<u8>>) -> &mut Builder{
+        self.requested_application_protocols = Some(request_application_protocols);
+        self
+    }
+
     /// Initialize a new TLS session where the stream provided will be
     /// connecting to a remote TLS server.
     ///
@@ -158,7 +167,8 @@ impl Builder {
         };
         let (ctxt, buf) = match SecurityContext::initialize(&mut cred,
                                                             accept,
-                                                            domain) {
+                                                            domain,
+                                                            &self.requested_application_protocols) {
             Ok(pair) => pair,
             Err(e) => return Err(HandshakeError::Failure(e)),
         };
@@ -185,6 +195,7 @@ impl Builder {
             enc_in: Cursor::new(Vec::new()),
             out_buf: Cursor::new(buf.map(|b| b.to_owned()).unwrap_or(Vec::new())),
             last_write_len: 0,
+            requested_application_protocols: self.requested_application_protocols.clone(),
         };
 
         MidHandshakeTlsStream {
@@ -226,6 +237,7 @@ pub struct TlsStream<S> {
     out_buf: Cursor<Vec<u8>>,
     /// the (unencrypted) length of the last write call used to track writes
     last_write_len: usize,
+    requested_application_protocols: Option<Vec<Vec<u8>>>,
 }
 
 /// ensures that a TlsStream is always Sync/Send
@@ -374,13 +386,57 @@ impl<S> TlsStream<S>
         self.initialize().map(|_| ())
     }
 
+    /// Returns the negotiated application protocol for this tls stream, if one exists
+    /// # Remarks
+    /// This is only valid if the tls handshake is completed, and will return None if called
+    /// before this point.
+    pub fn get_negotiated_application_protocol(&mut self) -> Option<Vec<u8>> {
+        if let State::Streaming { .. } = self.state {
+            unsafe {
+                let mut client_protos: sspi::SecPkgContext_ApplicationProtocol = mem::zeroed();
+                let client_protos_ptr = &mut client_protos as *mut sspi::SecPkgContext_ApplicationProtocol;
+                assert_eq!(
+                    sspi::QueryContextAttributesW(
+                        self.context.get_mut(),
+                        sspi::SECPKG_ATTR_APPLICATION_PROTOCOL,
+                        client_protos_ptr as *mut ctypes::c_void,
+                    ),
+                    winerror::SEC_E_OK
+                );
+                if client_protos_ptr.is_null() ||
+                    client_protos.ProtoNegoStatus != sspi::SecApplicationProtocolNegotiationStatus_Success ||
+                    client_protos.ProtoNegoExt != sspi::SecApplicationProtocolNegotiationExt_ALPN {
+                    return None;
+                }
+                let mut buf = vec![0;client_protos.ProtocolIdSize as usize];
+                buf.copy_from_slice(
+                    &client_protos.ProtocolId[..(client_protos.ProtocolIdSize as usize)],
+                );
+                Some(buf)
+            }
+        } else {
+            None
+        }
+    }
+
     fn step_initialize(&mut self) -> io::Result<()> {
         unsafe {
             let pos = self.enc_in.position() as usize;
-            let mut inbufs = [secbuf(sspi::SECBUFFER_TOKEN,
-                                     Some(&mut self.enc_in.get_mut()[..pos])),
-                              secbuf(sspi::SECBUFFER_EMPTY, None)];
-            let mut inbuf_desc = secbuf_desc(&mut inbufs);
+            let mut inbufs = vec![
+                secbuf(
+                    sspi::SECBUFFER_TOKEN,
+                    Some(&mut self.enc_in.get_mut()[..pos]),
+                ),
+                secbuf(sspi::SECBUFFER_EMPTY, None),
+            ];
+            if let Some(ref alpns) = self.requested_application_protocols {
+                let mut alpns = alpn_list(&alpns);
+                inbufs.push(secbuf(
+                    sspi::SECBUFFER_APPLICATION_PROTOCOLS,
+                    Some(&mut alpns[..]),
+                ));
+            };
+            let mut inbuf_desc = secbuf_desc(&mut inbufs[..]);
 
             let mut outbufs = [secbuf(sspi::SECBUFFER_TOKEN, None),
                                secbuf(sspi::SECBUFFER_ALERT, None),
