@@ -46,7 +46,7 @@ impl SecurityContext {
 
             let mut inbufs = vec![];
 
-            if let Some(ref alpns) = requested_application_protocols{
+            if let &Some(ref alpns) = requested_application_protocols{
                 let mut alpns = alpn_list(&alpns);
                 inbufs.push(
                     secbuf(
