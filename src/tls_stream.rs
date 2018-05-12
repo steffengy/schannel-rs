@@ -411,19 +411,19 @@ impl<S> TlsStream<S>
     /// # Remarks
     /// This is only valid if the tls handshake is completed, and will return None if called
     /// before this point.
-    pub fn get_negotiated_application_protocol(&mut self) -> Option<Vec<u8>> {
+    pub fn get_negotiated_application_protocol(&mut self) -> io::Result<Option<Vec<u8>>> {
         if let State::Streaming { .. } = self.state {
             unsafe {
                 let mut client_protos: sspi::SecPkgContext_ApplicationProtocol = mem::zeroed();
                 let client_protos_ptr = &mut client_protos as *mut sspi::SecPkgContext_ApplicationProtocol;
-                assert_eq!(
-                    sspi::QueryContextAttributesW(
+                let status = sspi::QueryContextAttributesW(
                         self.context.get_mut(),
                         sspi::SECPKG_ATTR_APPLICATION_PROTOCOL,
                         client_protos_ptr as *mut ctypes::c_void,
-                    ),
-                    winerror::SEC_E_OK
-                );
+                    );
+                if status != sppi::SEC_E_OK{
+                    return Err(io::Error::from_raw_os_error(status as i32));
+                }
                 if client_protos_ptr.is_null() ||
                     client_protos.ProtoNegoStatus != sspi::SecApplicationProtocolNegotiationStatus_Success ||
                     client_protos.ProtoNegoExt != sspi::SecApplicationProtocolNegotiationExt_ALPN {
@@ -433,10 +433,10 @@ impl<S> TlsStream<S>
                 buf.copy_from_slice(
                     &client_protos.ProtocolId[..(client_protos.ProtocolIdSize as usize)],
                 );
-                Some(buf)
+                Ok(Some(buf))
             }
         } else {
-            None
+            OK(None)
         }
     }
 
