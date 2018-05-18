@@ -97,22 +97,22 @@ unsafe fn alpn_list(protos: &Vec<Vec<u8>>) -> Vec<u8> {
 
     let mut protocol_lists_size = 0;
     for proto in protos {
-        protocol_lists_size += SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + proto.len() + 1;
+        protocol_lists_size += proto.len() + 1;
     }
-    let mut buf = vec![0; SEC_APPLICATION_PROTOCOLS_HEADER_SIZE + protocol_lists_size];
+    let mut buf = vec![0; SEC_APPLICATION_PROTOCOLS_HEADER_SIZE + SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + protocol_lists_size];
     {
         let protocols = buf.as_mut_ptr() as *mut sspi::SEC_APPLICATION_PROTOCOLS;
-        (*protocols).ProtocolListsSize = protocol_lists_size as ctypes::c_ulong;
+        (*protocols).ProtocolListsSize = (SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + protocol_lists_size) as ctypes::c_ulong;
     }
     let mut offset = SEC_APPLICATION_PROTOCOLS_HEADER_SIZE;
+    {
+        let protocol =
+            (&mut buf[offset..]).as_mut_ptr() as *mut sspi::SEC_APPLICATION_PROTOCOL_LIST;
+        (*protocol).ProtoNegoExt = sspi::SecApplicationProtocolNegotiationExt_ALPN;
+        (*protocol).ProtocolListSize = protocol_lists_size as ctypes::c_ushort;
+        offset += SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE;
+    }
     for proto in protos {
-        {
-            let protocol =
-                (&mut buf[offset..]).as_mut_ptr() as *mut sspi::SEC_APPLICATION_PROTOCOL_LIST;
-            (*protocol).ProtoNegoExt = sspi::SecApplicationProtocolNegotiationExt_ALPN;
-            (*protocol).ProtocolListSize = (proto.len() + 1) as ctypes::c_ushort;
-            offset += SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE;
-        }
         buf[offset] = proto.len() as u8;
         offset += 1;
         for &byte in proto {

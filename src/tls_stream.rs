@@ -421,13 +421,13 @@ impl<S> TlsStream<S>
                         sspi::SECPKG_ATTR_APPLICATION_PROTOCOL,
                         client_protos_ptr as *mut ctypes::c_void,
                     );
-                if status != sppi::SEC_E_OK{
+                if status != winerror::SEC_E_OK{
                     return Err(io::Error::from_raw_os_error(status as i32));
                 }
                 if client_protos_ptr.is_null() ||
                     client_protos.ProtoNegoStatus != sspi::SecApplicationProtocolNegotiationStatus_Success ||
                     client_protos.ProtoNegoExt != sspi::SecApplicationProtocolNegotiationExt_ALPN {
-                    return None;
+                    return Ok(None);
                 }
                 let mut buf = vec![0;client_protos.ProtocolIdSize as usize];
                 buf.copy_from_slice(
@@ -436,7 +436,7 @@ impl<S> TlsStream<S>
                 Ok(Some(buf))
             }
         } else {
-            OK(None)
+            Ok(None)
         }
     }
 
