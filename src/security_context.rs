@@ -77,10 +77,10 @@ impl SecurityContext {
         }
     }
 
-    pub fn stream_sizes(&mut self) -> io::Result<sspi::SecPkgContext_StreamSizes> {
+    pub fn stream_sizes(&self) -> io::Result<sspi::SecPkgContext_StreamSizes> {
         unsafe {
             let mut stream_sizes = mem::zeroed();
-            let status = sspi::QueryContextAttributesW(&mut self.0,
+            let status = sspi::QueryContextAttributesW(&self.0 as *const _ as *mut _,
                                                        sspi::SECPKG_ATTR_STREAM_SIZES,
                                                        &mut stream_sizes as *mut _ as *mut _);
             if status == winerror::SEC_E_OK {
@@ -91,10 +91,10 @@ impl SecurityContext {
         }
     }
 
-    pub fn remote_cert(&mut self) -> io::Result<CertContext> {
+    pub fn remote_cert(&self) -> io::Result<CertContext> {
         unsafe {
             let mut cert_context = mem::zeroed();
-            let status = sspi::QueryContextAttributesW(&mut self.0,
+            let status = sspi::QueryContextAttributesW(&self.0 as *const _ as *mut _,
                                                        minschannel::SECPKG_ATTR_REMOTE_CERT_CONTEXT,
                                                        &mut cert_context as *mut _ as *mut _);
             if status == winerror::SEC_E_OK {
