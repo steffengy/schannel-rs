@@ -332,6 +332,14 @@ impl<S> TlsStream<S>
         &mut self.stream
     }
 
+    /// Returns the peer's certificate, if available.
+    ///
+    /// Its associated cert store contains any intermediate certificates sent
+    /// by the server.
+    pub fn peer_certificate(&self) -> io::Result<CertContext> {
+        self.context.remote_cert()
+    }
+
     /// Returns a reference to the buffer of pending data.
     ///
     /// Like `BufRead::fill_buf` except that it will return an empty slice
