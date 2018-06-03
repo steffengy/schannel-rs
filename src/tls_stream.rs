@@ -147,7 +147,7 @@ impl Builder {
 
     fn initialize<S>(&mut self,
                      mut cred: SchannelCred,
-                     accept: bool,
+                     server: bool,
                      stream: S)
                          -> Result<TlsStream<S>, HandshakeError<S>>
         where S: Read + Write
@@ -157,7 +157,7 @@ impl Builder {
             _ => None,
         };
         let (ctxt, buf) = match SecurityContext::initialize(&mut cred,
-                                                            accept,
+                                                            server,
                                                             domain) {
             Ok(pair) => pair,
             Err(e) => return Err(HandshakeError::Failure(e)),
@@ -172,7 +172,7 @@ impl Builder {
             accept_invalid_hostnames: self.accept_invalid_hostnames,
             verify_callback: self.verify_callback.clone(),
             stream: stream,
-            accept: accept,
+            server: server,
             accept_first: true,
             state: State::Initializing {
                 needs_flush: false,
@@ -215,7 +215,7 @@ pub struct TlsStream<S> {
     verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     stream: S,
     state: State,
-    accept: bool,
+    server: bool,
     accept_first: bool,
     needs_read: usize,
     // valid from position() to len()
@@ -332,6 +332,11 @@ impl<S> TlsStream<S>
         &mut self.stream
     }
 
+    /// Indicates if this stream is the server- or client-side of a TLS session.
+    pub fn is_server(&self) -> bool {
+        self.server
+    }
+
     /// Returns the peer's certificate, if available.
     ///
     /// Its associated cert store contains any intermediate certificates sent
@@ -397,7 +402,7 @@ impl<S> TlsStream<S>
 
             let mut attributes = 0;
 
-            let status = if self.accept {
+            let status = if self.server {
                 let ptr = if self.accept_first {
                     ptr::null_mut()
                 } else {
@@ -561,7 +566,7 @@ impl<S> TlsStream<S>
     fn validate(&mut self, require_cert: bool) -> io::Result<bool> {
         // If we're accepting connections then we don't perform any validation
         // for the remote certificate, that's what they're doing!
-        if self.accept {
+        if self.server {
             return Ok(false);
         }
 
