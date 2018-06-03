@@ -1,4 +1,5 @@
 use winapi::shared::{sspi, winerror};
+use winapi::shared::minwindef::ULONG;
 use winapi::um::{minschannel};
 use std::mem;
 use std::ptr;
@@ -77,31 +78,35 @@ impl SecurityContext {
         }
     }
 
+    unsafe fn attribute<T>(&self, attr: ULONG) -> io::Result<T> {
+        let mut value = mem::uninitialized::<T>();
+        let status = sspi::QueryContextAttributesW(&self.0 as *const _ as *mut _,
+                                                   attr,
+                                                   &mut value as *mut _ as *mut _);
+        if status == winerror::SEC_E_OK {
+            Ok(value)
+        } else {
+            Err(io::Error::from_raw_os_error(status as i32))
+        }
+    }
+
     pub fn stream_sizes(&self) -> io::Result<sspi::SecPkgContext_StreamSizes> {
         unsafe {
-            let mut stream_sizes = mem::zeroed();
-            let status = sspi::QueryContextAttributesW(&self.0 as *const _ as *mut _,
-                                                       sspi::SECPKG_ATTR_STREAM_SIZES,
-                                                       &mut stream_sizes as *mut _ as *mut _);
-            if status == winerror::SEC_E_OK {
-                Ok(stream_sizes)
-            } else {
-                Err(io::Error::from_raw_os_error(status as i32))
-            }
+            self.attribute(sspi::SECPKG_ATTR_STREAM_SIZES)
         }
     }
 
     pub fn remote_cert(&self) -> io::Result<CertContext> {
         unsafe {
-            let mut cert_context = mem::zeroed();
-            let status = sspi::QueryContextAttributesW(&self.0 as *const _ as *mut _,
-                                                       minschannel::SECPKG_ATTR_REMOTE_CERT_CONTEXT,
-                                                       &mut cert_context as *mut _ as *mut _);
-            if status == winerror::SEC_E_OK {
-                Ok(CertContext::from_inner(cert_context))
-            } else {
-                Err(io::Error::from_raw_os_error(status as i32))
-            }
+            self.attribute(minschannel::SECPKG_ATTR_REMOTE_CERT_CONTEXT)
+                .map(|p| CertContext::from_inner(p))
+        }
+    }
+
+    pub fn local_cert(&self) -> io::Result<CertContext> {
+        unsafe {
+            self.attribute(minschannel::SECPKG_ATTR_LOCAL_CERT_CONTEXT)
+                .map(|p| CertContext::from_inner(p))
         }
     }
 }

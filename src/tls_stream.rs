@@ -337,6 +337,14 @@ impl<S> TlsStream<S>
         self.server
     }
 
+    /// Returns the certificate used to identify this side of the TLS session.
+    ///
+    /// Its associated cert store contains any intermediate certificates sent
+    /// along with the leaf.
+    pub fn certificate(&self) -> io::Result<CertContext> {
+        self.context.local_cert()
+    }
+
     /// Returns the peer's certificate, if available.
     ///
     /// Its associated cert store contains any intermediate certificates sent
