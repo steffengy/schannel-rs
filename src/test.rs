@@ -277,7 +277,7 @@ fn verify_callback_gives_failed_cert() {
     let err = tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
         .verify_callback(|validation_result| {
-            let expected_finger = vec!(100, 20, 80, 217, 74, 101, 250, 235, 59, 99, 16, 40, 216, 232, 108, 149, 67, 29, 184, 17);
+            let expected_finger = vec!(122, 87, 211, 36, 62, 157, 55, 233, 199, 67, 98, 104, 235, 3, 235, 46, 216, 240, 82, 150);
             assert_eq!(validation_result.failed_certificate().unwrap().fingerprint(HashAlgorithm::sha1()).unwrap(), expected_finger);
             Err(io::Error::from_raw_os_error(winerror::CERT_E_UNTRUSTEDROOT))
         })
