@@ -89,22 +89,22 @@ unsafe fn secbuf_desc(bufs: &mut [sspi::SecBuffer]) -> sspi::SecBufferDesc {
 
 unsafe fn alpn_list(protos: &Vec<Vec<u8>>) -> Vec<u8> {
     //the buffer is expected to not include packing but the structs are packed
-    //due to how they are defined, so we manually calculate the sizes of the headers
-    const SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE: usize =
-        mem::size_of::<sspi::SEC_APPLICATION_PROTOCOL_NEGOTIATION_EXT>()
-            + mem::size_of::<ctypes::c_ushort>();
-    const SEC_APPLICATION_PROTOCOLS_HEADER_SIZE: usize = mem::size_of::<ctypes::c_ulong>();
+    //due to how they are defined, so we subract the size of a c_ushort, as this
+    //is how much padding the structure will have
+	//
+	//Ideally this would be const, but const fn is not stable yet
+    let SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE: usize = mem::size_of::<sspi::SEC_APPLICATION_PROTOCOL_LIST>() - std::mem::size_of::<ctypes::c_ushort>();
 
     let mut protocol_lists_size = 0;
     for proto in protos {
         protocol_lists_size += proto.len() + 1;
     }
-    let mut buf = vec![0; SEC_APPLICATION_PROTOCOLS_HEADER_SIZE + SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + protocol_lists_size];
+    let mut buf = vec![0; mem::size_of::<sspi::SEC_APPLICATION_PROTOCOLS>() + SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + protocol_lists_size];
     {
         let protocols = buf.as_mut_ptr() as *mut sspi::SEC_APPLICATION_PROTOCOLS;
         (*protocols).ProtocolListsSize = (SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + protocol_lists_size) as ctypes::c_ulong;
     }
-    let mut offset = SEC_APPLICATION_PROTOCOLS_HEADER_SIZE;
+    let mut offset = mem::size_of::<sspi::SEC_APPLICATION_PROTOCOLS>();
     {
         let protocol =
             (&mut buf[offset..]).as_mut_ptr() as *mut sspi::SEC_APPLICATION_PROTOCOL_LIST;
