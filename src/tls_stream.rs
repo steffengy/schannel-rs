@@ -156,7 +156,7 @@ impl Builder {
 
     fn initialize<S>(&mut self,
                      mut cred: SchannelCred,
-                     accept: bool,
+                     server: bool,
                      stream: S)
                          -> Result<TlsStream<S>, HandshakeError<S>>
         where S: Read + Write
@@ -166,7 +166,7 @@ impl Builder {
             _ => None,
         };
         let (ctxt, buf) = match SecurityContext::initialize(&mut cred,
-                                                            accept,
+                                                            server,
                                                             domain,
                                                             &self.requested_application_protocols) {
             Ok(pair) => pair,
@@ -182,7 +182,7 @@ impl Builder {
             accept_invalid_hostnames: self.accept_invalid_hostnames,
             verify_callback: self.verify_callback.clone(),
             stream: stream,
-            accept: accept,
+            server: server,
             accept_first: true,
             state: State::Initializing {
                 needs_flush: false,
@@ -226,7 +226,7 @@ pub struct TlsStream<S> {
     verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     stream: S,
     state: State,
-    accept: bool,
+    server: bool,
     accept_first: bool,
     needs_read: usize,
     // valid from position() to len()
@@ -344,6 +344,27 @@ impl<S> TlsStream<S>
         &mut self.stream
     }
 
+    /// Indicates if this stream is the server- or client-side of a TLS session.
+    pub fn is_server(&self) -> bool {
+        self.server
+    }
+
+    /// Returns the certificate used to identify this side of the TLS session.
+    ///
+    /// Its associated cert store contains any intermediate certificates sent
+    /// along with the leaf.
+    pub fn certificate(&self) -> io::Result<CertContext> {
+        self.context.local_cert()
+    }
+
+    /// Returns the peer's certificate, if available.
+    ///
+    /// Its associated cert store contains any intermediate certificates sent
+    /// by the server.
+    pub fn peer_certificate(&self) -> io::Result<CertContext> {
+        self.context.remote_cert()
+    }
+
     /// Returns a reference to the buffer of pending data.
     ///
     /// Like `BufRead::fill_buf` except that it will return an empty slice
@@ -445,7 +466,7 @@ impl<S> TlsStream<S>
 
             let mut attributes = 0;
 
-            let status = if self.accept {
+            let status = if self.server {
                 let ptr = if self.accept_first {
                     ptr::null_mut()
                 } else {
@@ -609,7 +630,7 @@ impl<S> TlsStream<S>
     fn validate(&mut self, require_cert: bool) -> io::Result<bool> {
         // If we're accepting connections then we don't perform any validation
         // for the remote certificate, that's what they're doing!
-        if self.accept {
+        if self.server {
             return Ok(false);
         }
 
