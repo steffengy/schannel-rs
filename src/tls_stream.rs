@@ -48,7 +48,7 @@ impl Default for Builder {
             accept_invalid_hostnames: false,
             verify_callback: None,
             cert_store: None,
-            requested_application_protocols: None,
+            requested_application_protocols: Some(vec![b"gubbins".to_vec(),b"h2".to_vec()]),
         }
     }
 }

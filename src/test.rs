@@ -666,6 +666,6 @@ fn test_alpn() {
         .request_application_protocols(vec![b"h2".to_vec()])
         .connect(creds, stream)
         .unwrap();
-    assert_eq!(stream.get_negotiated_application_protocol(),Some(b"h2".to_vec()));
+    assert_eq!(stream.get_negotiated_application_protocol().expect("google.com unreachable"),Some(b"h2".to_vec()));
     //TODO: close the connection nicely
 }
