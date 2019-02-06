@@ -100,9 +100,10 @@ impl CertContext {
                 &mut size as *mut u32
                 );
             if size > 0 {
-                winapi::um::winbase::LocalFree(data_ptr as _);
                 let slice = std::slice::from_raw_parts(data_ptr, size as _);
-                return Ok(slice.to_vec());
+                let out = slice.to_vec();
+                winapi::um::winbase::LocalFree(data_ptr as _);
+                return Ok(out);
             }
         }
         Err(io::Error::last_os_error())
