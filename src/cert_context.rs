@@ -86,6 +86,27 @@ impl CertContext {
         self.get_encoded_bytes()
     }
 
+    /// Certificate subject public key info
+    pub fn subject_public_key_info_der(&self) -> io::Result<Vec<u8>> {
+        unsafe {
+            let mut data_ptr: *mut u8 = ptr::null_mut();
+            let mut size:u32 = 0;
+            wincrypt::CryptEncodeObjectEx(wincrypt::X509_ASN_ENCODING, 
+                wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _, 
+                &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
+                wincrypt::CRYPT_ENCODE_ALLOC_FLAG,
+                std::ptr::null_mut(),
+                std::mem::transmute(&mut data_ptr),
+                &mut size as *mut u32
+                );
+            if size > 0 {
+                let slice = std::slice::from_raw_parts(data_ptr, size as _);
+                return Ok(slice.to_vec());
+            }
+        }
+        Err(io::Error::last_os_error())
+    }
+
     /// Decodes a PEM-formatted X509 certificate.
     pub fn from_pem(pem: &str) -> io::Result<CertContext> {
         unsafe {
