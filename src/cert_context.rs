@@ -96,12 +96,12 @@ impl CertContext {
                 wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _, 
                 &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
                 wincrypt::CRYPT_ENCODE_ALLOC_FLAG,
-                std::ptr::null_mut(),
-                std::mem::transmute(&mut data_ptr),
+                ptr::null_mut(),
+                ::std::mem::transmute(&mut data_ptr),
                 &mut size as *mut u32
                 );
             if size > 0 {
-                let slice = std::slice::from_raw_parts(data_ptr, size as _);
+                let slice = ::std::slice::from_raw_parts(data_ptr, size as _);
                 let out = slice.to_vec();
                 winbase::LocalFree(data_ptr as _);
                 return Ok(out);
