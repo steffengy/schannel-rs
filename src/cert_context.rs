@@ -10,6 +10,7 @@ use winapi::shared::minwindef as winapi;
 use winapi::shared::ntdef;
 use winapi::shared::winerror;
 use winapi::um::wincrypt;
+use winapi::um::winbase;
 
 use Inner;
 use ncrypt_key::NcryptKey;
@@ -102,7 +103,7 @@ impl CertContext {
             if size > 0 {
                 let slice = std::slice::from_raw_parts(data_ptr, size as _);
                 let out = slice.to_vec();
-                winapi::um::winbase::LocalFree(data_ptr as _);
+                winbase::LocalFree(data_ptr as _);
                 return Ok(out);
             }
         }
