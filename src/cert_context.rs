@@ -90,21 +90,26 @@ impl CertContext {
     /// Certificate subject public key info
     pub fn subject_public_key_info_der(&self) -> io::Result<Vec<u8>> {
         unsafe {
-            let mut data_ptr: *mut u8 = ptr::null_mut();
-            let mut size:u32 = 0;
-            wincrypt::CryptEncodeObjectEx(wincrypt::X509_ASN_ENCODING, 
-                wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _, 
+            let mut len:u32 = 0;
+            wincrypt::CryptEncodeObjectEx(wincrypt::X509_ASN_ENCODING,
+                wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _,
                 &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
-                wincrypt::CRYPT_ENCODE_ALLOC_FLAG,
+                0,
                 std::ptr::null_mut(),
-                std::mem::transmute(&mut data_ptr),
-                &mut size as *mut u32
+                ptr::null_mut(),
+                &mut len as *mut _
                 );
-            if size > 0 {
-                let slice = std::slice::from_raw_parts(data_ptr, size as _);
-                let out = slice.to_vec();
-                winbase::LocalFree(data_ptr as _);
-                return Ok(out);
+            if len > 0 {
+                let mut buf = vec![0; len as usize];
+                wincrypt::CryptEncodeObjectEx(wincrypt::X509_ASN_ENCODING,
+                    wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _,
+                    &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
+                    0,
+                    ptr::null_mut(),
+                    buf.as_mut_ptr() as _,
+                    &mut len as *mut _,
+                    );
+                return Ok(buf);
             }
         }
         Err(io::Error::last_os_error())
