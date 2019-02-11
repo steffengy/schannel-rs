@@ -10,7 +10,6 @@ use winapi::shared::minwindef as winapi;
 use winapi::shared::ntdef;
 use winapi::shared::winerror;
 use winapi::um::wincrypt;
-use winapi::um::winbase;
 
 use Inner;
 use ncrypt_key::NcryptKey;
@@ -95,7 +94,7 @@ impl CertContext {
                 wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _,
                 &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
                 0,
-                std::ptr::null_mut(),
+                ptr::null_mut(),
                 ptr::null_mut(),
                 &mut len as *mut _
                 );
