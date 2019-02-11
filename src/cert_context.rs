@@ -90,24 +90,28 @@ impl CertContext {
     pub fn subject_public_key_info_der(&self) -> io::Result<Vec<u8>> {
         unsafe {
             let mut len:u32 = 0;
-            wincrypt::CryptEncodeObjectEx(wincrypt::X509_ASN_ENCODING,
-                wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _,
-                &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
-                0,
-                ptr::null_mut(),
-                ptr::null_mut(),
-                &mut len as *mut _
-                );
+            let ok = wincrypt::CryptEncodeObjectEx(wincrypt::X509_ASN_ENCODING,
+                                                   wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _,
+                                                   &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
+                                                   0,
+                                                   ptr::null_mut(),
+                                                   ptr::null_mut(),
+                                                   &mut len as *mut _);
+            if ok != winapi::TRUE {
+                return Err(io::Error::last_os_error());
+            }
             if len > 0 {
                 let mut buf = vec![0; len as usize];
-                wincrypt::CryptEncodeObjectEx(wincrypt::X509_ASN_ENCODING,
-                    wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _,
-                    &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
-                    0,
-                    ptr::null_mut(),
-                    buf.as_mut_ptr() as _,
-                    &mut len as *mut _,
-                    );
+                let ok = wincrypt::CryptEncodeObjectEx(wincrypt::X509_ASN_ENCODING,
+                                                  wincrypt::CERT_INFO_SUBJECT_PUBLIC_KEY_INFO_FLAG as *const u32 as *const _,
+                                                  &(*(*self.0).pCertInfo).SubjectPublicKeyInfo as *const wincrypt::CERT_PUBLIC_KEY_INFO as _,
+                                                  0,
+                                                  ptr::null_mut(),
+                                                  buf.as_mut_ptr() as _,
+                                                  &mut len as *mut _);
+                if ok != winapi::TRUE {
+                    return Err(io::Error::last_os_error());
+                }
                 return Ok(buf);
             }
         }
