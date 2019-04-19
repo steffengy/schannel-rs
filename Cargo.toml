@@ -9,6 +9,9 @@ repository = "https://github.com/steffengy/schannel-rs"
 readme = "README.md"
 keywords = ["windows", "schannel", "tls", "ssl", "https"]
 
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
+
 [dependencies]
 lazy_static = "1.0"
 winapi = { version = "0.3", features = ["lmcons", "minschannel", "securitybaseapi", "schannel", "sspi", "sysinfoapi", "timezoneapi", "winbase", "wincrypt", "winerror"] }
