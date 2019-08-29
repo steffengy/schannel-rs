@@ -173,7 +173,7 @@ pub struct ImportOptions<'a> {
 }
 
 impl<'a> ImportOptions<'a> {
-    /// Imports a DER-encoded private key.
+    /// Imports a DER-encoded PKCS1 private key.
     pub fn import(&mut self, der: &[u8]) -> io::Result<CryptKey> {
         unsafe {
             assert!(der.len() <= winapi::DWORD::max_value() as usize);
@@ -196,6 +196,56 @@ impl<'a> ImportOptions<'a> {
             let res = wincrypt::CryptImportKey(self.prov.0, buf, len, 0, self.flags, &mut key);
             winbase::LocalFree(buf as *mut _);
 
+            if res == winapi::TRUE {
+                Ok(CryptKey::from_inner(key))
+            } else {
+                Err(io::Error::last_os_error())
+            }
+        }
+    }
+
+    /// Imports a DER-encoded PKCS8 pricate key.
+    pub fn import_pkcs8(&mut self, der: &[u8]) -> io::Result<CryptKey> {
+        unsafe {
+            assert!(der.len() <= winapi::DWORD::max_value() as usize);
+
+            // Decode the der format into a CRYPT_PRIVATE_KEY_INFO struct
+            let mut buf = ptr::null_mut();
+            let mut len = 0;
+            let res = wincrypt::CryptDecodeObjectEx(wincrypt::X509_ASN_ENCODING |
+                                                    wincrypt::PKCS_7_ASN_ENCODING,
+                                                    wincrypt::PKCS_PRIVATE_KEY_INFO,
+                                                    der.as_ptr(),
+                                                    der.len() as winapi::DWORD,
+                                                    wincrypt::CRYPT_DECODE_ALLOC_FLAG,
+                                                    ptr::null_mut(),
+                                                    &mut buf as *mut _ as winapi::LPVOID,
+                                                    &mut len);
+            if res == winapi::FALSE {
+                return Err(io::Error::last_os_error());
+            }
+            let pkey: wincrypt::CRYPT_PRIVATE_KEY_INFO = *buf;
+
+            // Decode pkey's internal der blob again into the desired DSS V3 Private Key BLOB
+            let mut buf2 = ptr::null_mut();
+            let mut len2 = 0;
+            let res = wincrypt::CryptDecodeObjectEx(wincrypt::X509_ASN_ENCODING |
+                                                    wincrypt::PKCS_7_ASN_ENCODING,
+                                                    wincrypt::PKCS_RSA_PRIVATE_KEY,
+                                                    pkey.PrivateKey.pbData,
+                                                    pkey.PrivateKey.cbData,
+                                                    wincrypt::CRYPT_DECODE_ALLOC_FLAG,
+                                                    ptr::null_mut(),
+                                                    &mut buf2 as *mut _ as winapi::LPVOID,
+                                                    &mut len2);
+            if res == winapi::FALSE {
+                return Err(io::Error::last_os_error());
+            }
+
+            let mut key = 0;
+            let res = wincrypt::CryptImportKey(self.prov.0, buf2, len2, 0, self.flags, &mut key);
+            winbase::LocalFree(buf as *mut _);
+            winbase::LocalFree(buf2 as *mut _);
             if res == winapi::TRUE {
                 Ok(CryptKey::from_inner(key))
             } else {
