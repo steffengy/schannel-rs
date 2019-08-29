@@ -1,6 +1,7 @@
 //! CryptoAPI key providers.
 use std::io;
 use std::ptr;
+use std::slice;
 use winapi::shared::minwindef as winapi;
 use winapi::um::winbase;
 use winapi::um::wincrypt;
@@ -204,7 +205,7 @@ impl<'a> ImportOptions<'a> {
         }
     }
 
-    /// Imports a DER-encoded PKCS8 pricate key.
+    /// Imports a DER-encoded PKCS8 private key.
     pub fn import_pkcs8(&mut self, der: &[u8]) -> io::Result<CryptKey> {
         unsafe {
             assert!(der.len() <= winapi::DWORD::max_value() as usize);
@@ -225,32 +226,11 @@ impl<'a> ImportOptions<'a> {
                 return Err(io::Error::last_os_error());
             }
             let pkey: wincrypt::CRYPT_PRIVATE_KEY_INFO = *buf;
+            let pkey = pkey.PrivateKey;
 
-            // Decode pkey's internal der blob again into the desired DSS V3 Private Key BLOB
-            let mut buf2 = ptr::null_mut();
-            let mut len2 = 0;
-            let res = wincrypt::CryptDecodeObjectEx(wincrypt::X509_ASN_ENCODING |
-                                                    wincrypt::PKCS_7_ASN_ENCODING,
-                                                    wincrypt::PKCS_RSA_PRIVATE_KEY,
-                                                    pkey.PrivateKey.pbData,
-                                                    pkey.PrivateKey.cbData,
-                                                    wincrypt::CRYPT_DECODE_ALLOC_FLAG,
-                                                    ptr::null_mut(),
-                                                    &mut buf2 as *mut _ as winapi::LPVOID,
-                                                    &mut len2);
-            if res == winapi::FALSE {
-                return Err(io::Error::last_os_error());
-            }
-
-            let mut key = 0;
-            let res = wincrypt::CryptImportKey(self.prov.0, buf2, len2, 0, self.flags, &mut key);
+            let res = self.import(&slice::from_raw_parts(pkey.pbData, pkey.cbData as usize));
             winbase::LocalFree(buf as *mut _);
-            winbase::LocalFree(buf2 as *mut _);
-            if res == winapi::TRUE {
-                Ok(CryptKey::from_inner(key))
-            } else {
-                Err(io::Error::last_os_error())
-            }
+            res
         }
     }
 }
@@ -258,6 +238,7 @@ impl<'a> ImportOptions<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use winapi::shared::ntdef;
 
     #[test]
     fn rsa_key() {
@@ -269,6 +250,37 @@ mod test {
             .unwrap();
         context.import()
             .import(key)
+            .unwrap();
+    }
+
+    #[test]
+    fn pkcs8_key() {
+        let key = include_str!("../test/key.pem");
+        let der = unsafe {
+            let mut len = 0;
+            assert!(wincrypt::CryptStringToBinaryA(key.as_ptr() as ntdef::LPCSTR,
+                                                   key.len() as winapi::DWORD,
+                                                   wincrypt::CRYPT_STRING_BASE64HEADER,
+                                                   ptr::null_mut(),
+                                                   &mut len,
+                                                   ptr::null_mut(),
+                                                   ptr::null_mut()) == winapi::TRUE);
+            let mut buf = vec![0; len as usize];
+            assert!(wincrypt::CryptStringToBinaryA(key.as_ptr() as ntdef::LPCSTR,
+                                                   key.len() as winapi::DWORD,
+                                                   wincrypt::CRYPT_STRING_BASE64HEADER,
+                                                   buf.as_mut_ptr(),
+                                                   &mut len,
+                                                   ptr::null_mut(),
+                                                   ptr::null_mut()) == winapi::TRUE);
+            buf
+        };
+        let mut context = AcquireOptions::new()
+            .verify_context(true)
+            .acquire(ProviderType::rsa_full())
+            .unwrap();
+        context.import()
+            .import_pkcs8(&der)
             .unwrap();
     }
 }
