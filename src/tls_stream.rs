@@ -319,9 +319,7 @@ impl<S> fmt::Debug for TlsStream<S>
     }
 }
 
-impl<S> TlsStream<S>
-    where S: Read + Write
-{
+impl<S> TlsStream<S> {
     /// Returns a reference to the wrapped stream.
     pub fn get_ref(&self) -> &S {
         &self.stream
@@ -336,7 +334,11 @@ impl<S> TlsStream<S>
     pub fn is_server(&self) -> bool {
         self.server
     }
+}
 
+impl<S> TlsStream<S>
+    where S: Read + Write
+{
     /// Returns the certificate used to identify this side of the TLS session.
     ///
     /// Its associated cert store contains any intermediate certificates sent
@@ -840,9 +842,7 @@ impl<S> TlsStream<S>
     }
 }
 
-impl<S> MidHandshakeTlsStream<S>
-    where S: Read + Write,
-{
+impl<S> MidHandshakeTlsStream<S> {
     /// Returns a shared reference to the inner stream.
     pub fn get_ref(&self) -> &S {
         self.inner.get_ref()
@@ -852,7 +852,11 @@ impl<S> MidHandshakeTlsStream<S>
     pub fn get_mut(&mut self) -> &mut S {
         self.inner.get_mut()
     }
+}
 
+impl<S> MidHandshakeTlsStream<S>
+    where S: Read + Write,
+{
     /// Restarts the handshake process.
     pub fn handshake(mut self) -> Result<TlsStream<S>, HandshakeError<S>> {
         match self.inner.initialize() {
