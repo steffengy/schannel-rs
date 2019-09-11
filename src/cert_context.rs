@@ -11,10 +11,10 @@ use winapi::shared::ntdef;
 use winapi::shared::winerror;
 use winapi::um::wincrypt;
 
-use Inner;
-use ncrypt_key::NcryptKey;
-use crypt_prov::{CryptProv, ProviderType};
-use cert_store::CertStore;
+use crate::Inner;
+use crate::ncrypt_key::NcryptKey;
+use crate::crypt_prov::{CryptProv, ProviderType};
+use crate::cert_store::CertStore;
 
 /// A supported hashing algorithm
 pub struct HashAlgorithm(winapi::DWORD, usize);
@@ -210,7 +210,7 @@ impl CertContext {
     #[deprecated(note = "please use fingerprint instead")]
     pub fn sha1(&self) -> io::Result<[u8; 20]> {
         let mut out = [0u8; 20];
-        out.copy_from_slice(&try!(self.fingerprint(HashAlgorithm::sha1())));
+        out.copy_from_slice(&self.fingerprint(HashAlgorithm::sha1())?);
         Ok(out)
     }
 

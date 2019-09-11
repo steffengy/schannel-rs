@@ -5,11 +5,11 @@ use std::mem;
 use std::ptr;
 use std::io;
 
-use {INIT_REQUESTS, Inner, secbuf, secbuf_desc};
-use cert_context::CertContext;
-use context_buffer::ContextBuffer;
+use crate::{INIT_REQUESTS, Inner, secbuf, secbuf_desc};
+use crate::cert_context::CertContext;
+use crate::context_buffer::ContextBuffer;
 
-use schannel_cred::SchannelCred;
+use crate::schannel_cred::SchannelCred;
 
 pub struct SecurityContext(sspi::CtxtHandle);
 
@@ -79,7 +79,7 @@ impl SecurityContext {
     }
 
     unsafe fn attribute<T>(&self, attr: ULONG) -> io::Result<T> {
-        let mut value = mem::uninitialized::<T>();
+        let mut value = std::mem::zeroed();
         let status = sspi::QueryContextAttributesW(&self.0 as *const _ as *mut _,
                                                    attr,
                                                    &mut value as *mut _ as *mut _);
