@@ -11,10 +11,10 @@ use winapi::shared::minwindef as winapi;
 use winapi::shared::ntdef;
 use winapi::um::wincrypt;
 
-use cert_context::CertContext;
-use ctl_context::CtlContext;
+use crate::cert_context::CertContext;
+use crate::ctl_context::CtlContext;
 
-use Inner;
+use crate::Inner;
 
 /// Representation of certificate store on Windows, wrapping a `HCERTSTORE`.
 pub struct CertStore(wincrypt::HCERTSTORE);
@@ -405,7 +405,7 @@ impl Memory {
 #[cfg(test)]
 mod test {
     use super::*;
-    use ctl_context::CtlContext;
+    use crate::ctl_context::CtlContext;
 
     #[test]
     fn load() {

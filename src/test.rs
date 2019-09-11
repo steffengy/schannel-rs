@@ -3,18 +3,18 @@ use std::io::{self, Read, Write, Error};
 use std::mem;
 use std::net::{TcpStream, TcpListener};
 use std::ptr;
-use std::sync::{Once, ONCE_INIT};
+use std::sync::{Once};
 use std::thread;
 use winapi::shared::minwindef as winapi;
 use winapi::shared::{basetsd, ntdef, lmcons, winerror};
 use winapi::um::{minwinbase, sysinfoapi, timezoneapi, wincrypt};
 
-use Inner;
-use crypt_prov::{AcquireOptions, ProviderType};
-use cert_context::{CertContext, KeySpec, HashAlgorithm};
-use cert_store::{CertStore, Memory, CertAdd};
-use schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
-use tls_stream::{self, HandshakeError};
+use crate::Inner;
+use crate::crypt_prov::{AcquireOptions, ProviderType};
+use crate::cert_context::{CertContext, KeySpec, HashAlgorithm};
+use crate::cert_store::{CertStore, Memory, CertAdd};
+use crate::schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
+use crate::tls_stream::{self, HandshakeError};
 
 #[test]
 fn basic() {
@@ -397,7 +397,7 @@ fn install_certificate() -> io::Result<CertContext> {
             return Err(Error::last_os_error());
         }
         let cert_context = CertContext::from_inner(cert_context);
-        try!(cert_context.set_friendly_name(FRIENDLY_NAME));
+        cert_context.set_friendly_name(FRIENDLY_NAME)?;
 
         // install the certificate to the machine's local store
         io::stdout().write_all(br#"
@@ -412,7 +412,7 @@ If you would rather not do this please cancel the addition and re-run the
 test suite with SCHANNEL_RS_SKIP_SERVER_TESTS=1.
 
 "#).unwrap();
-        try!(local_root_store().add_cert(&cert_context, CertAdd::ReplaceExisting));
+        local_root_store().add_cert(&cert_context, CertAdd::ReplaceExisting)?;
         Ok(cert_context)
     }
 }
@@ -447,7 +447,7 @@ fn localhost_cert() -> Option<CertContext> {
     //
     // After the initialization is performed we just probe the root store again
     // and find the certificate we added (or was already there).
-    static INIT: Once = ONCE_INIT;
+    static INIT: Once = Once::new();
     INIT.call_once(|| {
         for cert in local_root_store().certs() {
             let name = match cert.friendly_name() {

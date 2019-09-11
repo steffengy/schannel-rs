@@ -14,7 +14,7 @@ use winapi::shared::sspi;
 
 macro_rules! inner {
     ($t:path, $raw:ty) => {
-        impl ::Inner<$raw> for $t {
+        impl crate::Inner<$raw> for $t {
             unsafe fn from_inner(t: $raw) -> Self {
                 $t(t)
             }

@@ -4,8 +4,8 @@ use std::mem;
 use std::slice;
 use winapi::um::wincrypt;
 
-use cert_context::CertContext;
-use Inner;
+use crate::cert_context::CertContext;
+use crate::Inner;
 
 /// A certificate chain context (consisting of multiple chains)
 pub struct CertChainContext(pub wincrypt::PCERT_CHAIN_CONTEXT);

@@ -6,8 +6,8 @@ use std::io;
 use std::mem;
 use std::ptr;
 
-use Inner;
-use cert_context::CertContext;
+use crate::Inner;
+use crate::cert_context::CertContext;
 
 lazy_static! {
     static ref UNISP_NAME: Vec<u8> = um::schannel::UNISP_NAME.bytes().chain(Some(0)).collect();

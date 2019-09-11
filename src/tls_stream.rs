@@ -12,13 +12,13 @@ use winapi::shared::minwindef as winapi;
 use winapi::shared::{ntdef, sspi, winerror};
 use winapi::um::{self, wincrypt};
 
-use {INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
-use cert_chain::{CertChain, CertChainContext};
-use cert_store::{CertAdd, CertStore};
-use cert_context::CertContext;
-use security_context::SecurityContext;
-use context_buffer::ContextBuffer;
-use schannel_cred::SchannelCred;
+use crate::{INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
+use crate::cert_chain::{CertChain, CertChainContext};
+use crate::cert_store::{CertAdd, CertStore};
+use crate::cert_context::CertContext;
+use crate::security_context::SecurityContext;
+use crate::context_buffer::ContextBuffer;
+use crate::schannel_cred::SchannelCred;
 
 lazy_static! {
     static ref szOID_PKIX_KP_SERVER_AUTH: Vec<u8> =
@@ -34,7 +34,7 @@ pub struct Builder {
     domain: Option<Vec<u16>>,
     use_sni: bool,
     accept_invalid_hostnames: bool,
-    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
+    verify_callback: Option<Arc<dyn Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     cert_store: Option<CertStore>,
 }
 
@@ -212,7 +212,7 @@ pub struct TlsStream<S> {
     domain: Option<Vec<u16>>,
     use_sni: bool,
     accept_invalid_hostnames: bool,
-    verify_callback: Option<Arc<Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
+    verify_callback: Option<Arc<dyn Fn(CertValidationResult) -> io::Result<()> + Sync + Send>>,
     stream: S,
     state: State,
     server: bool,
@@ -285,7 +285,7 @@ impl<S: fmt::Debug + Any> Error for HandshakeError<S> {
         }
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         match *self {
             HandshakeError::Failure(ref e) => Some(e),
             HandshakeError::Interrupted(_) => None,
@@ -295,9 +295,9 @@ impl<S: fmt::Debug + Any> Error for HandshakeError<S> {
 
 impl<S: fmt::Debug + Any> fmt::Display for HandshakeError<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(f.write_str(self.description()));
-        if let Some(e) = self.cause() {
-           try!(write!(f, ": {}", e));
+        f.write_str(self.description())?;
+        if let Some(e) = self.source() {
+           write!(f, ": {}", e)?;
         }
         Ok(())
     }
@@ -503,7 +503,7 @@ impl<S> TlsStream<S>
                         self.out_buf.get_mut().extend_from_slice(&to_write);
                     }
                     if self.enc_in.position() != 0 {
-                        try!(self.decrypt());
+                        self.decrypt()?;
                     }
                     if let State::Initializing { ref mut more_calls, .. } = self.state {
                         *more_calls = false;
@@ -521,7 +521,7 @@ impl<S> TlsStream<S>
         loop {
             match self.state {
                 State::Initializing { mut needs_flush, more_calls, shutting_down, validated } => {
-                    if try!(self.write_out()) > 0 {
+                    if self.write_out()? > 0 {
                         needs_flush = true;
                         if let State::Initializing { ref mut needs_flush, .. } = self.state {
                             *needs_flush = true;
@@ -529,7 +529,7 @@ impl<S> TlsStream<S>
                     }
 
                     if needs_flush {
-                        try!(self.stream.flush());
+                        self.stream.flush()?;
                         if let State::Initializing { ref mut needs_flush, .. } = self.state {
                             *needs_flush = false;
                         }
@@ -537,7 +537,7 @@ impl<S> TlsStream<S>
 
                     if !shutting_down && !validated {
                         // on the last call, we require a valid certificate
-                        if try!(self.validate(!more_calls)) {
+                        if self.validate(!more_calls)? {
                             if let State::Initializing { ref mut validated, .. } = self.state {
                                 *validated = true;
                             }
@@ -548,19 +548,19 @@ impl<S> TlsStream<S>
                         self.state = if shutting_down {
                             State::Shutdown
                         } else {
-                            State::Streaming { sizes: try!(self.context.stream_sizes()) }
+                            State::Streaming { sizes: self.context.stream_sizes()? }
                         };
                         continue;
                     }
 
                     if self.needs_read > 0 {
-                        if try!(self.read_in()) == 0 {
+                        if self.read_in()? == 0 {
                             return Err(io::Error::new(io::ErrorKind::UnexpectedEof,
                                                       "unexpected EOF during handshake"));
                         }
                     }
 
-                    try!(self.step_initialize());
+                    self.step_initialize()?;
                 }
                 State::Streaming { sizes } => return Ok(Some(sizes)),
                 State::Shutdown => return Ok(None),
@@ -580,14 +580,14 @@ impl<S> TlsStream<S>
 
         let cert_context = match self.context.remote_cert() {
             Err(_) if !require_cert => return Ok(false),
-            ret => try!(ret)
+            ret => ret?
         };
 
         let cert_chain = unsafe {
             let cert_store = match (cert_context.cert_store(), &self.cert_store) {
                 (Some(ref mut chain_certs), &Some(ref extra_certs)) => {
                     for extra_cert in extra_certs.certs() {
-                        try!(chain_certs.add_cert(&extra_cert, CertAdd::ReplaceExisting));
+                        chain_certs.add_cert(&extra_cert, CertAdd::ReplaceExisting)?;
                     }
                     chain_certs.as_inner()
                 },
@@ -681,7 +681,7 @@ impl<S> TlsStream<S>
                     chain_index: status.lChainIndex,
                     element_index: status.lElementIndex});
             }
-            try!(verify_result);
+            verify_result?;
         }
         Ok(true)
     }
@@ -690,7 +690,7 @@ impl<S> TlsStream<S>
         let mut out = 0;
         while self.out_buf.position() as usize != self.out_buf.get_ref().len() {
             let position = self.out_buf.position() as usize;
-            let nwritten = try!(self.stream.write(&self.out_buf.get_ref()[position..]));
+            let nwritten = self.stream.write(&self.out_buf.get_ref()[position..])?;
             out += nwritten;
             self.out_buf.set_position((position + nwritten) as u64);
         }
@@ -709,7 +709,7 @@ impl<S> TlsStream<S>
             }
             let nread = {
                 let buf = &mut self.enc_in.get_mut()[existing_len..];
-                try!(self.stream.read(buf))
+                self.stream.read(buf)?
             };
             self.enc_in.set_position((existing_len + nread) as u64);
             self.needs_read = self.needs_read.saturating_sub(nread);
@@ -872,7 +872,7 @@ impl<S> Write for TlsStream<S>
     /// starting with the same input data
     /// This is similar to the use of ACCEPT_MOVING_WRITE_BUFFER in openssl
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let sizes = match try!(self.initialize()) {
+        let sizes = match self.initialize()? {
             Some(sizes) => sizes,
             None => return Err(io::Error::from_raw_os_error(winerror::SEC_E_CONTEXT_EXPIRED as i32)),
         };
@@ -881,17 +881,17 @@ impl<S> Write for TlsStream<S>
         // attempt to send this part of the data ran into an error.
         if self.out_buf.position() == self.out_buf.get_ref().len() as u64 {
             let len = cmp::min(buf.len(), sizes.cbMaximumMessage as usize);
-            try!(self.encrypt(&buf[..len], &sizes));
+            self.encrypt(&buf[..len], &sizes)?;
             self.last_write_len = len;
         }
-        try!(self.write_out());
+        self.write_out()?;
 
         Ok(self.last_write_len)
     }
 
     fn flush(&mut self) -> io::Result<()> {
         // Make sure the write buffer is emptied
-        try!(self.write_out());
+        self.write_out()?;
         self.stream.flush()
     }
 }
@@ -901,7 +901,7 @@ impl<S> Read for TlsStream<S>
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let nread = {
-            let read_buf = try!(self.fill_buf());
+            let read_buf = self.fill_buf()?;
             let nread = cmp::min(buf.len(), read_buf.len());
             buf[..nread].copy_from_slice(&read_buf[..nread]);
             nread
@@ -916,18 +916,18 @@ impl<S> BufRead for TlsStream<S>
 {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         while self.get_buf().is_empty() {
-            if let None = try!(self.initialize()) {
+            if let None = self.initialize()? {
                 break;
             }
 
             if self.needs_read > 0 {
-                if try!(self.read_in()) == 0 {
+                if self.read_in()? == 0 {
                     break;
                 }
                 self.needs_read = 0;
             }
 
-            let eof = try!(self.decrypt());
+            let eof = self.decrypt()?;
             if eof {
                 break;
             }

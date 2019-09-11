@@ -6,8 +6,8 @@ use winapi::shared::minwindef as winapi;
 use winapi::um::winbase;
 use winapi::um::wincrypt;
 
-use Inner;
-use crypt_key::CryptKey;
+use crate::Inner;
+use crate::crypt_key::CryptKey;
 
 /// A CryptoAPI handle to a provider of a key.
 pub struct CryptProv(wincrypt::HCRYPTPROV);

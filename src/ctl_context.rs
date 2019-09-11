@@ -9,8 +9,8 @@ use winapi::shared::minwindef as winapi;
 use winapi::shared::ntdef;
 use winapi::um::wincrypt;
 
-use cert_context::CertContext;
-use Inner;
+use crate::cert_context::CertContext;
+use crate::Inner;
 
 lazy_static! {
 	static ref szOID_OIWSEC_sha1: Vec<u8> =
@@ -91,7 +91,7 @@ impl Builder {
             let mut entry_data = vec![];
             let mut entries = vec![];
             for certificate in &self.certificates {
-                let data = try!(cert_entry(certificate));
+                let data = cert_entry(certificate)?;
                 entries.push(*(data.as_ptr() as *const wincrypt::CTL_ENTRY));
                 entry_data.push(data);
             }
