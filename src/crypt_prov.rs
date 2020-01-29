@@ -3,6 +3,7 @@ use std::io;
 use std::ptr;
 use std::slice;
 use winapi::shared::minwindef as winapi;
+use winapi::shared::ntdef;
 use winapi::um::winbase;
 use winapi::um::wincrypt;
 
@@ -233,6 +234,56 @@ impl<'a> ImportOptions<'a> {
             res
         }
     }
+
+    /// Imports a PEM-encoded PKCS8 private key.
+    /// This functions decodes PEM blocks with or without "-----BEGIN PRIVATE KEY-----"
+    /// and "-----END PRIVATE KEY-----" headers, but if PEM guards are present they must be exactly
+    /// these.
+    pub fn import_pkcs8_pem(&mut self, pem: &[u8]) -> io::Result<CryptKey> {
+        let pem_str = std::str::from_utf8(pem)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid utf-8"))?
+            .trim();
+
+        if pem_str.starts_with("-----") {
+            if !pem_str.starts_with("-----BEGIN PRIVATE KEY-----") ||
+               !pem_str.ends_with("-----END PRIVATE KEY-----") {
+                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                          "expected '-----BEGIN PRIVATE KEY-----'\
+                                          and '-----END PRIVATE KEY-----' PEM guards"));
+            }
+        }
+        unsafe {
+            assert!(pem.len() <= winapi::DWORD::max_value() as usize);
+
+            // Decode the pem wrapper before passing it to import_pkcs8
+            // Call once first to figure out the necessary buffer size
+            let mut len = 0;
+            let res = wincrypt::CryptStringToBinaryA(pem.as_ptr() as ntdef::LPCSTR,
+                                                    pem.len() as winapi::DWORD,
+                                                    wincrypt::CRYPT_STRING_BASE64_ANY,
+                                                    ptr::null_mut(),
+                                                    &mut len,
+                                                    ptr::null_mut(),
+                                                    ptr::null_mut());
+            if res == winapi::FALSE {
+                return Err(io::Error::last_os_error());
+            }
+
+            // Call second time to actually get the DER bytes
+            let mut der_buf = vec![0; len as usize];
+            let res = wincrypt::CryptStringToBinaryA(pem.as_ptr() as ntdef::LPCSTR,
+                                                    pem.len() as winapi::DWORD,
+                                                    wincrypt::CRYPT_STRING_BASE64_ANY,
+                                                    der_buf.as_mut_ptr(),
+                                                    &mut len,
+                                                    ptr::null_mut(),
+                                                    ptr::null_mut());
+            if res == winapi::FALSE {
+                return Err(io::Error::last_os_error());
+            }
+            self.import_pkcs8(&der_buf)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -282,5 +333,78 @@ mod test {
         context.import()
             .import_pkcs8(&der)
             .unwrap();
+    }
+
+    #[test]
+    // this also covers rejecting a pkcs1 key through import_pkcs8_pem
+    fn pkcs8_key_reject_pkcs1() {
+        let key = include_bytes!("../test/key.key");
+        let mut context = AcquireOptions::new()
+            .verify_context(true)
+            .acquire(ProviderType::rsa_full())
+            .unwrap();
+        assert!(context.import()
+            .import_pkcs8(&key[..])
+            .is_err());
+    }
+
+    #[test]
+    fn pkcs8_key_pem() {
+        let key = include_bytes!("../test/key.pem");
+        let mut context = AcquireOptions::new()
+            .verify_context(true)
+            .acquire(ProviderType::rsa_full())
+            .unwrap();
+        context.import()
+            .import_pkcs8_pem(key)
+            .unwrap();
+    }
+
+    #[test]
+    fn pkcs8_key_pem_no_headers() {
+        let key = include_bytes!("../test/key_no_headers.pem");
+        let mut context = AcquireOptions::new()
+            .verify_context(true)
+            .acquire(ProviderType::rsa_full())
+            .unwrap();
+        context.import()
+            .import_pkcs8_pem(key)
+            .unwrap();
+    }
+
+    #[test]
+    fn pkcs8_key_pem_no_end_header() {
+        let key = include_bytes!("../test/key_no_end_header.pem");
+        let mut context = AcquireOptions::new()
+            .verify_context(true)
+            .acquire(ProviderType::rsa_full())
+            .unwrap();
+        assert!(context.import()
+            .import_pkcs8_pem(key)
+            .is_err());
+    }
+
+    #[test]
+    fn pkcs8_key_pem_wrong_header() {
+        let key = include_bytes!("../test/key_wrong_header.pem");
+        let mut context = AcquireOptions::new()
+            .verify_context(true)
+            .acquire(ProviderType::rsa_full())
+            .unwrap();
+        assert!(context.import()
+            .import_pkcs8_pem(key)
+            .is_err());
+    }
+
+    #[test]
+    fn pkcs8_key_pem_invalid_header() {
+        let key = include_bytes!("../test/key_invalid_header.pem");
+        let mut context = AcquireOptions::new()
+            .verify_context(true)
+            .acquire(ProviderType::rsa_full())
+            .unwrap();
+        assert!(context.import()
+            .import_pkcs8_pem(key)
+            .is_err());
     }
 }
