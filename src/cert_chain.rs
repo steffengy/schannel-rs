@@ -8,7 +8,8 @@ use crate::cert_context::CertContext;
 use crate::Inner;
 
 /// A certificate chain context (consisting of multiple chains)
-pub struct CertChainContext(pub wincrypt::PCERT_CHAIN_CONTEXT);
+pub struct CertChainContext(pub(crate) wincrypt::PCERT_CHAIN_CONTEXT);
+inner!(CertChainContext, wincrypt::PCERT_CHAIN_CONTEXT);
 
 unsafe impl Sync for CertChainContext {}
 unsafe impl Send for CertChainContext {}

@@ -278,14 +278,7 @@ impl CertValidationResult {
 }
 
 impl<S: fmt::Debug + Any> Error for HandshakeError<S> {
-    fn description(&self) -> &str {
-        match *self {
-            HandshakeError::Failure(_) => "failed to perform handshake",
-            HandshakeError::Interrupted(_) => "interrupted performing handshake",
-        }
-    }
-
-    fn cause(&self) -> Option<&dyn Error> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         match *self {
             HandshakeError::Failure(ref e) => Some(e),
             HandshakeError::Interrupted(_) => None,
@@ -295,7 +288,11 @@ impl<S: fmt::Debug + Any> Error for HandshakeError<S> {
 
 impl<S: fmt::Debug + Any> fmt::Display for HandshakeError<S> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(self.description())?;
+        let desc = match *self {
+            HandshakeError::Failure(_) => "failed to perform handshake",
+            HandshakeError::Interrupted(_) => "interrupted performing handshake",
+        };
+        write!(f, "{}", desc)?;
         if let Some(e) = self.source() {
            write!(f, ": {}", e)?;
         }
