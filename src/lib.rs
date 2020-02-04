@@ -27,7 +27,29 @@ macro_rules! inner {
                 &mut self.0
             }
         }
+
+        impl crate::RawPointer for $t {
+            unsafe fn from_ptr(t: *mut ::std::os::raw::c_void) -> $t {
+                $t(t as _)
+            }
+
+            unsafe fn as_ptr(&self) -> *mut ::std::os::raw::c_void {
+                self.0 as *mut _
+            }
+        }
     }
+}
+
+/// Allows access to the underlying schannel API representation of a wrapped data type
+/// 
+/// Performing actions with internal handles might lead to the violation of internal assumptions 
+/// and therefore is inherently unsafe.
+pub trait RawPointer {
+    /// Constructs an instance of this type from its handle / pointer.
+    unsafe fn from_ptr(t: *mut ::std::os::raw::c_void) -> Self;
+
+    /// Get a raw pointer from the underlying handle / pointer.
+    unsafe fn as_ptr(&self) -> *mut ::std::os::raw::c_void;
 }
 
 pub mod cert_chain;
