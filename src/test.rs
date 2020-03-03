@@ -9,7 +9,7 @@ use winapi::shared::minwindef as winapi;
 use winapi::shared::{basetsd, ntdef, lmcons, winerror};
 use winapi::um::{minwinbase, sysinfoapi, timezoneapi, wincrypt};
 
-use crate::Inner;
+use crate::{Inner, alpn_list};
 use crate::crypt_prov::{AcquireOptions, ProviderType};
 use crate::cert_context::{CertContext, KeySpec, HashAlgorithm};
 use crate::cert_store::{CertStore, Memory, CertAdd};
@@ -719,4 +719,150 @@ fn split_cert_key() {
     assert_eq!(stream.read(&mut buf).unwrap(), 0);
 
     t.join().unwrap();
+}
+
+#[test]
+fn test_loopback_alpn() {
+    let cert = match localhost_cert() {
+        Some(cert) => cert,
+        None => return,
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let t = thread::spawn(move || {
+        let stream = TcpStream::connect(&addr).unwrap();
+        let creds = SchannelCred::builder()
+            .acquire(Direction::Outbound)
+            .unwrap();
+        let mut stream = tls_stream::Builder::new()
+            .domain("localhost")
+            .request_application_protocols(&[b"h2"])
+            .connect(creds, stream)
+            .unwrap();
+        assert_eq!(
+            stream
+                .negotiated_application_protocol()
+                .expect("localhost unreachable"),
+            Some(b"h2".to_vec())
+        );
+
+        stream.shutdown().unwrap();
+    });
+
+    let stream = listener.accept().unwrap().0;
+    let creds = SchannelCred::builder()
+        .cert(cert)
+        .acquire(Direction::Inbound)
+        .unwrap();
+    let stream = tls_stream::Builder::new()
+        .request_application_protocols(&[b"h2"])
+        .accept(creds, stream)
+        .unwrap();
+    assert_eq!(
+        stream
+            .negotiated_application_protocol()
+            .expect("localhost unreachable"),
+        Some(b"h2".to_vec())
+    );
+
+    t.join().unwrap();
+}
+
+#[test]
+fn test_loopback_alpn_mismatch() {
+    let cert = match localhost_cert() {
+        Some(cert) => cert,
+        None => return,
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let t = thread::spawn(move || {
+        let stream = TcpStream::connect(&addr).unwrap();
+        let creds = SchannelCred::builder()
+            .acquire(Direction::Outbound)
+            .unwrap();
+        let mut stream = tls_stream::Builder::new()
+            .domain("localhost")
+            .connect(creds, stream)
+            .unwrap();
+        assert_eq!(
+            stream
+                .negotiated_application_protocol()
+                .expect("localhost unreachable"),
+            None
+        );
+
+        stream.shutdown().unwrap();
+    });
+
+    let stream = listener.accept().unwrap().0;
+    let creds = SchannelCred::builder()
+        .cert(cert)
+        .acquire(Direction::Inbound)
+        .unwrap();
+    let stream = tls_stream::Builder::new()
+        .request_application_protocols(&[b"h2"])
+        .accept(creds, stream)
+        .unwrap();
+    assert_eq!(
+        stream
+            .negotiated_application_protocol()
+            .expect("localhost unreachable"),
+        None
+    );
+
+    t.join().unwrap();
+}
+
+#[test]
+fn test_external_alpn() {
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
+    let stream = TcpStream::connect("google.com:443").unwrap();
+    let stream = tls_stream::Builder::new()
+        .request_application_protocols(&[b"h2"])
+        .domain("google.com")
+        .connect(creds, stream)
+        .unwrap();
+    assert_eq!(
+        stream
+            .negotiated_application_protocol()
+            .expect("google.com unreachable"),
+        Some(b"h2".to_vec())
+    );
+}
+
+#[test]
+fn test_alpn_list() {
+    let raw_proto_alpn_list = b"\x02h2";
+    // Little-endian bit representation of the expected `SEC_APPLICATION_PROTOCOL_LIST`.
+    let proto_list = &[
+        // `sspi::SecApplicationProtocolNegotiationExt_ALPN` equals 2.
+        &[2, 0, 0, 0, raw_proto_alpn_list.len() as u8, 0] as &[u8],
+        raw_proto_alpn_list,
+    ]
+    .concat();
+    let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], &proto_list].concat();
+    unsafe {
+        assert_eq!(alpn_list(&vec![b"h2".to_vec()]), full_alpn_list);
+    }
+
+    let raw_proto_alpn_list = b"\x02h2\x08http/1.1";
+    // Little-endian bit representation of the expected `SEC_APPLICATION_PROTOCOL_LIST`.
+    let proto_list = &[
+        // `sspi::SecApplicationProtocolNegotiationExt_ALPN` equals 2.
+        &[2, 0, 0, 0, raw_proto_alpn_list.len() as u8, 0] as &[u8],
+        raw_proto_alpn_list,
+    ]
+    .concat();
+    let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], &proto_list].concat();
+    unsafe {
+        assert_eq!(
+            alpn_list(&vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
+            full_alpn_list
+        );
+    }
 }
