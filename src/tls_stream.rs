@@ -353,17 +353,9 @@ impl<S> TlsStream<S>
     }
 
     /// Returns whether or not the session was resumed.
-    ///
-    /// # Remarks
-    /// This is only valid if the TLS handshake is completed, and will return None if called
-    /// before this point.
-    pub fn session_resumed(&self) -> io::Result<Option<bool>> {
-        if let State::Streaming { .. } = self.state {
-            let session_info = self.context.session_info()?;
-            Ok(Some(session_info.dwFlags & schannel::SSL_SESSION_RECONNECT > 0))
-        } else {
-            Ok(None)
-        }
+    pub fn session_resumed(&self) -> io::Result<bool> {
+        let session_info = self.context.session_info()?;
+        Ok(session_info.dwFlags & schannel::SSL_SESSION_RECONNECT > 0)
     }
 
     /// Returns a reference to the buffer of pending data.
