@@ -10,7 +10,7 @@ use std::slice;
 use std::sync::Arc;
 use winapi::shared::minwindef as winapi;
 use winapi::shared::{ntdef, sspi, winerror};
-use winapi::um::{self, wincrypt};
+use winapi::um::{self, schannel, wincrypt};
 
 use crate::{INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
 use crate::cert_chain::{CertChain, CertChainContext};
@@ -352,6 +352,20 @@ impl<S> TlsStream<S>
         self.context.remote_cert()
     }
 
+    /// Returns whether or not the session was resumed.
+    ///
+    /// # Remarks
+    /// This is only valid if the TLS handshake is completed, and will return None if called
+    /// before this point.
+    pub fn session_resumed(&self) -> io::Result<Option<bool>> {
+        if let State::Streaming { .. } = self.state {
+            let session_info = self.context.session_info()?;
+            Ok(Some(session_info.dwFlags & schannel::SSL_SESSION_RECONNECT > 0))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Returns a reference to the buffer of pending data.
     ///
     /// Like `BufRead::fill_buf` except that it will return an empty slice
@@ -415,7 +429,7 @@ impl<S> TlsStream<S>
                 } else {
                     self.context.get_mut()
                 };
-                sspi::AcceptSecurityContext(self.cred.get_mut(),
+                sspi::AcceptSecurityContext(&mut self.cred.as_inner(),
                                             ptr,
                                             &mut inbuf_desc,
                                             ACCEPT_REQUESTS,
@@ -430,7 +444,7 @@ impl<S> TlsStream<S>
                     _ => ptr::null_mut(),
                 };
 
-                sspi::InitializeSecurityContextW(self.cred.get_mut(),
+                sspi::InitializeSecurityContextW(&mut self.cred.as_inner(),
                                                  self.context.get_mut(),
                                                  domain,
                                                  INIT_REQUESTS,
