@@ -244,23 +244,17 @@ impl Drop for RawCredHandle {
     }
 }
 
-impl Inner<sspi::CredHandle> for SchannelCred {
-    unsafe fn from_inner(inner: sspi::CredHandle) -> SchannelCred {
-        SchannelCred(Arc::new(RawCredHandle(inner)))
-    }
-
-    fn as_inner(&self) -> sspi::CredHandle {
-        self.0.as_ref().0
-    }
-
-    fn get_mut(&mut self) -> &mut sspi::CredHandle {
-        unimplemented!()
-    }
-}
-
 impl SchannelCred {
     /// Returns a builder.
     pub fn builder() -> Builder {
         Builder::new()
+    }
+
+    unsafe fn from_inner(inner: sspi::CredHandle) -> SchannelCred {
+        SchannelCred(Arc::new(RawCredHandle(inner)))
+    }
+
+    pub(crate) fn as_inner(&self) -> sspi::CredHandle {
+        self.0.as_ref().0
     }
 }

@@ -342,7 +342,7 @@ fn session_resumption_thread_safety() {
             for _ in 0..10 {
                 let creds = creds_copy.clone();
                 let stream = TcpStream::connect("google.com:443").unwrap();
-                let mut stream = tls_stream::Builder::new()
+                let stream = tls_stream::Builder::new()
                     .domain("google.com")
                     .connect(creds, stream)
                     .unwrap();
