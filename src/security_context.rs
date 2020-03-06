@@ -1,6 +1,6 @@
 use winapi::shared::{sspi, winerror};
 use winapi::shared::minwindef::ULONG;
-use winapi::um::{minschannel};
+use winapi::um::{minschannel, schannel};
 use std::mem;
 use std::ptr;
 use std::io;
@@ -56,7 +56,7 @@ impl SecurityContext {
 
             let mut attributes = 0;
 
-            match sspi::InitializeSecurityContextW(cred.get_mut(),
+            match sspi::InitializeSecurityContextW(&mut cred.as_inner(),
                                                    ptr::null_mut(),
                                                    domain,
                                                    INIT_REQUESTS,
@@ -87,6 +87,12 @@ impl SecurityContext {
             Ok(value)
         } else {
             Err(io::Error::from_raw_os_error(status as i32))
+        }
+    }
+
+    pub fn session_info(&self) -> io::Result<schannel::SecPkgContext_SessionInfo> {
+        unsafe {
+            self.attribute(minschannel::SECPKG_ATTR_SESSION_INFO)
         }
     }
 
