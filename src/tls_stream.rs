@@ -431,7 +431,7 @@ impl<S> TlsStream<S>
                                   secbuf(sspi::SECBUFFER_EMPTY, None)];
             // Make sure the return value of `alpn_list` is kept alive for the duration of this
             // function.
-            let mut alpns = self.requested_application_protocols.as_ref().map(alpn_list);
+            let mut alpns = self.requested_application_protocols.as_ref().map(|alpn| alpn_list(alpn));
             if let Some(ref mut alpns) = alpns {
                 inbufs.push(secbuf(sspi::SECBUFFER_APPLICATION_PROTOCOLS,
                                    Some(&mut alpns[..])));
