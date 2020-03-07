@@ -372,7 +372,7 @@ impl<S> TlsStream<S>
         {
             return Ok(None);
         }
-        Ok(Some(client_proto.ProtocolId[..(client_proto.ProtocolIdSize as usize)].to_vec()))
+        Ok(Some(client_proto.ProtocolId[..client_proto.ProtocolIdSize as usize].to_vec()))
     }
 
     /// Returns whether or not the session was resumed.
@@ -429,8 +429,10 @@ impl<S> TlsStream<S>
             let mut inbufs = vec![secbuf(sspi::SECBUFFER_TOKEN,
                                          Some(&mut self.enc_in.get_mut()[..pos])),
                                   secbuf(sspi::SECBUFFER_EMPTY, None)];
-            if let Some(ref alpns) = self.requested_application_protocols {
-                let mut alpns = alpn_list(&alpns);
+            // Make sure the return value of `alpn_list` is kept alive for the duration of this
+            // function.
+            let mut alpns = self.requested_application_protocols.as_ref().map(alpn_list);
+            if let Some(ref mut alpns) = alpns {
                 inbufs.push(secbuf(sspi::SECBUFFER_APPLICATION_PROTOCOLS,
                                    Some(&mut alpns[..])));
             };

@@ -54,13 +54,13 @@ impl SecurityContext {
 
             let mut inbufs = vec![];
 
-            if let &Some(ref alpns) = requested_application_protocols {
-                let mut alpns = alpn_list(&alpns);
-                inbufs.push(secbuf(
-                    sspi::SECBUFFER_APPLICATION_PROTOCOLS,
-                    Some(&mut alpns[..]),
-                ));
-            }
+            // Make sure the return value of `alpn_list` is kept alive for the duration of this
+            // function.
+            let mut alpns = requested_application_protocols.as_ref().map(alpn_list);
+            if let Some(ref mut alpns) = alpns {
+                inbufs.push(secbuf(sspi::SECBUFFER_APPLICATION_PROTOCOLS,
+                                   Some(&mut alpns[..])));
+            };
 
             let mut inbuf_desc = secbuf_desc(&mut inbufs[..]);
 

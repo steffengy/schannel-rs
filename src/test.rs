@@ -846,9 +846,7 @@ fn test_alpn_list() {
     ]
     .concat();
     let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], &proto_list].concat();
-    unsafe {
-        assert_eq!(alpn_list(&vec![b"h2".to_vec()]), full_alpn_list);
-    }
+    assert_eq!(alpn_list(&vec![b"h2".to_vec()]), full_alpn_list);
 
     let raw_proto_alpn_list = b"\x02h2\x08http/1.1";
     // Little-endian bit representation of the expected `SEC_APPLICATION_PROTOCOL_LIST`.
@@ -859,10 +857,5 @@ fn test_alpn_list() {
     ]
     .concat();
     let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], &proto_list].concat();
-    unsafe {
-        assert_eq!(
-            alpn_list(&vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
-            full_alpn_list
-        );
-    }
+    assert_eq!(alpn_list(&vec![b"h2".to_vec(), b"http/1.1".to_vec()]), full_alpn_list);
 }
