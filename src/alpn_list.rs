@@ -47,13 +47,13 @@ impl AlpnList {
 
         unsafe {
             // Safety: `layout` is guaranteed to have non-zero size.
-            let memory = alloc::alloc(layout);
-            if memory.is_null() {
-                alloc::handle_alloc_error(layout);
-            }
+            let memory = match ptr::NonNull::new(alloc::alloc(layout)) {
+                Some(ptr) => ptr,
+                None => alloc::handle_alloc_error(layout),
+            };
 
             // Safety: `memory` was created from `layout`.
-            let buf = slice::from_raw_parts_mut(memory, layout.size());
+            let buf = slice::from_raw_parts_mut(memory.as_ptr(), layout.size());
             let protocols = &mut *(buf.as_mut_ptr() as *mut sspi::SEC_APPLICATION_PROTOCOLS);
             protocols.ProtocolListsSize =
                 (SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + alpn_wire_format.len()) as ctypes::c_ulong;
@@ -68,7 +68,7 @@ impl AlpnList {
 
             Self {
                 layout,
-                memory: ptr::NonNull::new(memory).unwrap(),
+                memory,
             }
         }
     }
