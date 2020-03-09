@@ -5,7 +5,8 @@ use std::mem;
 use std::ptr;
 use std::io;
 
-use crate::{INIT_REQUESTS, Inner, alpn_list, secbuf, secbuf_desc};
+use crate::{INIT_REQUESTS, Inner, secbuf, secbuf_desc};
+use crate::alpn_list::AlpnList;
 use crate::cert_context::CertContext;
 use crate::context_buffer::ContextBuffer;
 
@@ -54,9 +55,8 @@ impl SecurityContext {
 
             let mut inbufs = vec![];
 
-            // Make sure the return value of `alpn_list` is kept alive for the duration of this
-            // function.
-            let mut alpns = requested_application_protocols.as_ref().map(|alpn| alpn_list(alpn));
+            // Make sure `AlpnList` is kept alive for the duration of this function.
+            let mut alpns = requested_application_protocols.as_ref().map(|alpn| AlpnList::new(&alpn));
             if let Some(ref mut alpns) = alpns {
                 inbufs.push(secbuf(sspi::SECBUFFER_APPLICATION_PROTOCOLS,
                                    Some(&mut alpns[..])));

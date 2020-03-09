@@ -12,7 +12,8 @@ use winapi::shared::minwindef as winapi;
 use winapi::shared::{ntdef, sspi, winerror};
 use winapi::um::{self, schannel, wincrypt};
 
-use crate::{INIT_REQUESTS, ACCEPT_REQUESTS, Inner, alpn_list, secbuf, secbuf_desc};
+use crate::{INIT_REQUESTS, ACCEPT_REQUESTS, Inner, secbuf, secbuf_desc};
+use crate::alpn_list::AlpnList;
 use crate::cert_chain::{CertChain, CertChainContext};
 use crate::cert_store::{CertAdd, CertStore};
 use crate::cert_context::CertContext;
@@ -429,9 +430,8 @@ impl<S> TlsStream<S>
             let mut inbufs = vec![secbuf(sspi::SECBUFFER_TOKEN,
                                          Some(&mut self.enc_in.get_mut()[..pos])),
                                   secbuf(sspi::SECBUFFER_EMPTY, None)];
-            // Make sure the return value of `alpn_list` is kept alive for the duration of this
-            // function.
-            let mut alpns = self.requested_application_protocols.as_ref().map(|alpn| alpn_list(alpn));
+            // Make sure `AlpnList` is kept alive for the duration of this function.
+            let mut alpns = self.requested_application_protocols.as_ref().map(|alpn| AlpnList::new(&alpn));
             if let Some(ref mut alpns) = alpns {
                 inbufs.push(secbuf(sspi::SECBUFFER_APPLICATION_PROTOCOLS,
                                    Some(&mut alpns[..])));

@@ -9,7 +9,8 @@ use winapi::shared::minwindef as winapi;
 use winapi::shared::{basetsd, ntdef, lmcons, winerror};
 use winapi::um::{minwinbase, sysinfoapi, timezoneapi, wincrypt};
 
-use crate::{Inner, alpn_list};
+use crate::Inner;
+use crate::alpn_list::AlpnList;
 use crate::crypt_prov::{AcquireOptions, ProviderType};
 use crate::cert_context::{CertContext, KeySpec, HashAlgorithm};
 use crate::cert_store::{CertStore, Memory, CertAdd};
@@ -846,7 +847,7 @@ fn test_alpn_list() {
     ]
     .concat();
     let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], &proto_list].concat();
-    assert_eq!(alpn_list(&vec![b"h2".to_vec()]), full_alpn_list);
+    assert_eq!(&AlpnList::new(&vec![b"h2".to_vec()]) as &[u8], &full_alpn_list as &[u8]);
 
     let raw_proto_alpn_list = b"\x02h2\x08http/1.1";
     // Little-endian bit representation of the expected `SEC_APPLICATION_PROTOCOL_LIST`.
@@ -857,5 +858,5 @@ fn test_alpn_list() {
     ]
     .concat();
     let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], &proto_list].concat();
-    assert_eq!(alpn_list(&vec![b"h2".to_vec(), b"http/1.1".to_vec()]), full_alpn_list);
+    assert_eq!(&AlpnList::new(&vec![b"h2".to_vec(), b"http/1.1".to_vec()]) as &[u8], &full_alpn_list as &[u8]);
 }
