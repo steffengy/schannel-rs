@@ -63,6 +63,7 @@ pub mod ncrypt_key;
 pub mod schannel_cred;
 pub mod tls_stream;
 
+mod alpn_list;
 mod context_buffer;
 mod security_context;
 

@@ -6,6 +6,7 @@ use std::ptr;
 use std::io;
 
 use crate::{INIT_REQUESTS, Inner, secbuf, secbuf_desc};
+use crate::alpn_list::AlpnList;
 use crate::cert_context::CertContext;
 use crate::context_buffer::ContextBuffer;
 
@@ -38,7 +39,8 @@ impl Inner<sspi::CtxtHandle> for SecurityContext {
 impl SecurityContext {
     pub fn initialize(cred: &mut SchannelCred,
                       accept: bool,
-                      domain: Option<&[u16]>)
+                      domain: Option<&[u16]>,
+                      requested_application_protocols: &Option<Vec<Vec<u8>>>)
                       -> io::Result<(SecurityContext, Option<ContextBuffer>)> {
         unsafe {
             let mut ctxt = mem::zeroed();
@@ -51,6 +53,17 @@ impl SecurityContext {
 
             let domain = domain.map(|b| b.as_ptr() as *mut u16).unwrap_or(ptr::null_mut());
 
+            let mut inbufs = vec![];
+
+            // Make sure `AlpnList` is kept alive for the duration of this function.
+            let mut alpns = requested_application_protocols.as_ref().map(|alpn| AlpnList::new(&alpn));
+            if let Some(ref mut alpns) = alpns {
+                inbufs.push(secbuf(sspi::SECBUFFER_APPLICATION_PROTOCOLS,
+                                   Some(&mut alpns[..])));
+            };
+
+            let mut inbuf_desc = secbuf_desc(&mut inbufs[..]);
+
             let mut outbuf = [secbuf(sspi::SECBUFFER_EMPTY, None)];
             let mut outbuf_desc = secbuf_desc(&mut outbuf);
 
@@ -62,7 +75,7 @@ impl SecurityContext {
                                                    INIT_REQUESTS,
                                                    0,
                                                    0,
-                                                   ptr::null_mut(),
+                                                   &mut inbuf_desc,
                                                    0,
                                                    &mut ctxt,
                                                    &mut outbuf_desc,
@@ -87,6 +100,12 @@ impl SecurityContext {
             Ok(value)
         } else {
             Err(io::Error::from_raw_os_error(status as i32))
+        }
+    }
+
+    pub fn application_protocol(&self) -> io::Result<sspi::SecPkgContext_ApplicationProtocol> {
+        unsafe {
+            self.attribute(sspi::SECPKG_ATTR_APPLICATION_PROTOCOL)
         }
     }
 
