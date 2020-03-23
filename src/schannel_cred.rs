@@ -53,9 +53,8 @@ pub enum Algorithm {
     DssSign = wincrypt::CALG_DSS_SIGN,
     /// Elliptic curve Diffie-Hellman key exchange algorithm.
     Ecdh = wincrypt::CALG_ECDH,
-    // https://github.com/retep998/wincrypt-rs/issues/287
-    // /// Ephemeral elliptic curve Diffie-Hellman key exchange algorithm.
-    // EcdhEphem = wincrypt::CALG_ECDH_EPHEM,
+    /// Ephemeral elliptic curve Diffie-Hellman key exchange algorithm.
+    EcdhEphem = wincrypt::CALG_ECDH_EPHEM,
     /// Elliptic curve digital signature algorithm.
     Ecdsa = wincrypt::CALG_ECDSA,
     /// One way function hashing algorithm.
