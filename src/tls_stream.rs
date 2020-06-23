@@ -894,7 +894,7 @@ impl<S> MidHandshakeTlsStream<S>
     pub fn handshake(mut self) -> Result<TlsStream<S>, HandshakeError<S>> {
         match self.inner.initialize() {
             Ok(_) => Ok(self.inner),
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+            Err(ref e) if [io::ErrorKind::WouldBlock, io::ErrorKind::NotConnected].contains(&e.kind()) => {
                 Err(HandshakeError::Interrupted(self))
             }
             Err(e) => Err(HandshakeError::Failure(e)),
