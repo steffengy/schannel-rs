@@ -37,12 +37,12 @@ macro_rules! inner {
                 self.0 as *mut _
             }
         }
-    }
+    };
 }
 
 /// Allows access to the underlying schannel API representation of a wrapped data type
-/// 
-/// Performing actions with internal handles might lead to the violation of internal assumptions 
+///
+/// Performing actions with internal handles might lead to the violation of internal assumptions
 /// and therefore is inherently unsafe.
 pub trait RawPointer {
     /// Constructs an instance of this type from its handle / pointer.
@@ -55,9 +55,14 @@ pub trait RawPointer {
 pub mod cert_chain;
 pub mod cert_context;
 pub mod cert_store;
-pub mod crypt_key;
-pub mod crypt_prov;
-/* pub */ mod ctl_context;
+
+#[cfg(feature = "allow-deprecated")]
+mod deprecated;
+#[cfg(feature = "allow-deprecated")]
+pub use deprecated::*;
+
+/* pub */
+mod ctl_context;
 pub mod key_handle;
 pub mod ncrypt_key;
 pub mod schannel_cred;
@@ -70,15 +75,20 @@ mod security_context;
 #[cfg(test)]
 mod test;
 
-const ACCEPT_REQUESTS: ctypes::c_ulong =
-    sspi::ASC_REQ_ALLOCATE_MEMORY | sspi::ASC_REQ_CONFIDENTIALITY |
-    sspi::ASC_REQ_SEQUENCE_DETECT | sspi::ASC_REQ_STREAM |
-    sspi::ASC_REQ_REPLAY_DETECT;
+const ACCEPT_REQUESTS: ctypes::c_ulong = sspi::ASC_REQ_ALLOCATE_MEMORY
+    | sspi::ASC_REQ_CONFIDENTIALITY
+    | sspi::ASC_REQ_SEQUENCE_DETECT
+    | sspi::ASC_REQ_STREAM
+    | sspi::ASC_REQ_REPLAY_DETECT;
 
-const INIT_REQUESTS: ctypes::c_ulong =
-    sspi::ISC_REQ_CONFIDENTIALITY | sspi::ISC_REQ_INTEGRITY | sspi::ISC_REQ_REPLAY_DETECT |
-    sspi::ISC_REQ_SEQUENCE_DETECT | sspi::ISC_REQ_MANUAL_CRED_VALIDATION |
-    sspi::ISC_REQ_ALLOCATE_MEMORY | sspi::ISC_REQ_STREAM | sspi::ISC_REQ_USE_SUPPLIED_CREDS;
+const INIT_REQUESTS: ctypes::c_ulong = sspi::ISC_REQ_CONFIDENTIALITY
+    | sspi::ISC_REQ_INTEGRITY
+    | sspi::ISC_REQ_REPLAY_DETECT
+    | sspi::ISC_REQ_SEQUENCE_DETECT
+    | sspi::ISC_REQ_MANUAL_CRED_VALIDATION
+    | sspi::ISC_REQ_ALLOCATE_MEMORY
+    | sspi::ISC_REQ_STREAM
+    | sspi::ISC_REQ_USE_SUPPLIED_CREDS;
 
 trait Inner<T> {
     unsafe fn from_inner(t: T) -> Self;
@@ -88,8 +98,7 @@ trait Inner<T> {
     fn get_mut(&mut self) -> &mut T;
 }
 
-unsafe fn secbuf(buftype: ctypes::c_ulong,
-                 bytes: Option<&mut [u8]>) -> sspi::SecBuffer {
+unsafe fn secbuf(buftype: ctypes::c_ulong, bytes: Option<&mut [u8]>) -> sspi::SecBuffer {
     let (ptr, len) = match bytes {
         Some(bytes) => (bytes.as_mut_ptr(), bytes.len() as ctypes::c_ulong),
         None => (ptr::null_mut(), 0),
