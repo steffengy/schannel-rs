@@ -11,6 +11,7 @@ use winapi::um::{minwinbase, sysinfoapi, timezoneapi, wincrypt};
 
 use crate::Inner;
 use crate::alpn_list::AlpnList;
+#[cfg(feature = "allow-deprecated")]
 use crate::crypt_prov::{AcquireOptions, ProviderType};
 use crate::cert_context::{CertContext, KeySpec, HashAlgorithm};
 use crate::cert_store::{CertStore, Memory, CertAdd};
@@ -658,6 +659,7 @@ fn accept_one_byte_at_a_time() {
 }
 
 #[test]
+#[cfg(feature = "allow-deprecated")]
 fn split_cert_key() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
