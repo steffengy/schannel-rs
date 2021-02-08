@@ -14,4 +14,8 @@ default-target = "x86_64-pc-windows-msvc"
 
 [dependencies]
 lazy_static = "1.0"
-winapi = { version = "0.3", features = ["lmcons", "minschannel", "securitybaseapi", "schannel", "sspi", "sysinfoapi", "timezoneapi", "winbase", "wincrypt", "winerror"] }
+winapi = { version = "0.3", features = ["minwindef", "ntdef", "lmcons", "minschannel", "securitybaseapi", "schannel", "sspi", "sysinfoapi", "timezoneapi", "winbase", "wincrypt", "winerror", "ncrypt"] }
+
+
+[features]
+allow-deprecated = []

@@ -13,7 +13,8 @@ use winapi::um::wincrypt;
 
 use crate::Inner;
 use crate::ncrypt_key::NcryptKey;
-use crate::crypt_prov::{CryptProv, ProviderType};
+#[cfg(feature = "allow-deprecated")]
+use crate::deprecated::crypt_prov::{CryptProv, ProviderType};
 use crate::cert_store::CertStore;
 
 /// A supported hashing algorithm
@@ -456,7 +457,13 @@ impl<'a> AcquirePrivateKeyOptions<'a> {
     /// Acquires the private key handle.
     pub fn acquire(&self) -> io::Result<PrivateKey> {
         unsafe {
-            let flags = self.flags | wincrypt::CRYPT_ACQUIRE_ALLOW_NCRYPT_KEY_FLAG;
+            let api_flag = if cfg!(feature = "allow-deprecated") {
+                wincrypt::CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG
+            } else {
+                wincrypt:: CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG
+            };
+
+            let flags = self.flags | api_flag;
             let mut handle = 0;
             let mut spec = 0;
             let mut free = winapi::FALSE;
@@ -471,10 +478,15 @@ impl<'a> AcquirePrivateKeyOptions<'a> {
             }
             assert!(free == winapi::TRUE);
             if spec & wincrypt::CERT_NCRYPT_KEY_SPEC != 0 {
-                Ok(PrivateKey::NcryptKey(NcryptKey::from_inner(handle)))
-            } else {
-                Ok(PrivateKey::CryptProv(CryptProv::from_inner(handle)))
-            }
+                return Ok(PrivateKey::NcryptKey(NcryptKey::from_inner(handle)));
+            } 
+            
+            #[cfg(feature = "allow-deprecated")] 
+            return Ok(PrivateKey::CryptProv(CryptProv::from_inner(handle)));
+            
+            #[cfg(not(feature = "allow-deprecated"))] 
+            return Err(io::Error::new(io::ErrorKind::Other, "Api failure"));
+            
         }
     }
 }
@@ -482,6 +494,7 @@ impl<'a> AcquirePrivateKeyOptions<'a> {
 /// The private key associated with a certificate context.
 pub enum PrivateKey {
     /// A CryptoAPI provider.
+    #[cfg(feature = "allow-deprecated")]
     CryptProv(CryptProv),
     /// A CNG provider.
     NcryptKey(NcryptKey),
@@ -520,6 +533,7 @@ impl<'a> SetKeyProvInfo<'a> {
     ///
     /// If not provided, the key container is one of the CNG key storage
     /// providers.
+    #[cfg(feature = "allow-deprecated")]
     pub fn type_(&mut self, type_: ProviderType) -> &mut SetKeyProvInfo<'a> {
         self.type_ = type_.as_raw();
         self
