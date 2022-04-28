@@ -1,31 +1,31 @@
 //! CryptoAPI key providers.
+use std::ffi::c_void;
 use std::io;
 use std::ptr;
 use std::slice;
-use winapi::shared::minwindef as winapi;
-use winapi::shared::ntdef;
-use winapi::um::winbase;
-use winapi::um::wincrypt;
 
-use crate::Inner;
+use windows_sys::Win32::Security::Cryptography;
+use windows_sys::Win32::System::Memory;
+
 use crate::crypt_key::CryptKey;
+use crate::Inner;
 
 /// A CryptoAPI handle to a provider of a key.
-pub struct CryptProv(wincrypt::HCRYPTPROV);
+pub struct CryptProv(Cryptography::HCRYPTPROV_OR_NCRYPT_KEY_HANDLE);
 
 impl Drop for CryptProv {
     fn drop(&mut self) {
         unsafe {
-            wincrypt::CryptReleaseContext(self.0, 0);
+            Cryptography::CryptReleaseContext(self.0, 0);
         }
     }
 }
 
-inner!(CryptProv, wincrypt::HCRYPTPROV);
+inner!(CryptProv, Cryptography::HCRYPTPROV_OR_NCRYPT_KEY_HANDLE);
 
 impl CryptProv {
     /// Imports a key into this provider.
-    pub fn import<'a>(&'a mut self) -> ImportOptions<'a> {
+    pub fn import(&mut self) -> ImportOptions {
         ImportOptions {
             prov: self,
             flags: 0,
@@ -34,20 +34,17 @@ impl CryptProv {
 }
 
 /// A builder for `CryptProv`s.
+#[derive(Default)]
 pub struct AcquireOptions {
     container: Option<Vec<u16>>,
     provider: Option<Vec<u16>>,
-    flags: winapi::DWORD,
+    flags: u32,
 }
 
 impl AcquireOptions {
     /// Returns a new builder with default settings.
     pub fn new() -> AcquireOptions {
-        AcquireOptions {
-            container: None,
-            provider: None,
-            flags: 0,
-        }
+        AcquireOptions::default()
     }
 
     /// Sets the name for this key container.
@@ -66,26 +63,26 @@ impl AcquireOptions {
 
     /// If set, private keys will not be accessible or persisted.
     pub fn verify_context(&mut self, verify_context: bool) -> &mut AcquireOptions {
-        self.flag(wincrypt::CRYPT_VERIFYCONTEXT, verify_context)
+        self.flag(Cryptography::CRYPT_VERIFYCONTEXT, verify_context)
     }
 
     /// If set, the container will be created.
     pub fn new_keyset(&mut self, new_keyset: bool) -> &mut AcquireOptions {
-        self.flag(wincrypt::CRYPT_NEWKEYSET, new_keyset)
+        self.flag(Cryptography::CRYPT_NEWKEYSET, new_keyset)
     }
 
     /// If set, the container will be stored as a machine rather than user keys.
     pub fn machine_keyset(&mut self, machine_keyset: bool) -> &mut AcquireOptions {
-        self.flag(wincrypt::CRYPT_MACHINE_KEYSET, machine_keyset)
+        self.flag(Cryptography::CRYPT_MACHINE_KEYSET, machine_keyset)
     }
 
     /// If set, an error will be returned if user intervention is required
     /// rather than displaying a dialog.
     pub fn silent(&mut self, silent: bool) -> &mut AcquireOptions {
-        self.flag(wincrypt::CRYPT_SILENT, silent)
+        self.flag(Cryptography::CRYPT_SILENT, silent)
     }
 
-    fn flag(&mut self, flag: winapi::DWORD, on: bool) -> &mut AcquireOptions {
+    fn flag(&mut self, flag: u32, on: bool) -> &mut AcquireOptions {
         if on {
             self.flags |= flag;
         } else {
@@ -98,16 +95,26 @@ impl AcquireOptions {
     /// Acquires a container.
     pub fn acquire(&self, type_: ProviderType) -> io::Result<CryptProv> {
         unsafe {
-            let container = self.container.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null());
-            let provider = self.provider.as_ref().map(|s| s.as_ptr()).unwrap_or(ptr::null());
+            let container = self
+                .container
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(ptr::null());
+            let provider = self
+                .provider
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(ptr::null());
 
             let mut prov = 0;
-            let res = wincrypt::CryptAcquireContextW(&mut prov,
-                                                     container as *mut _,
-                                                     provider as *mut _,
-                                                     type_.0,
-                                                     self.flags);
-            if res == winapi::TRUE {
+            let res = Cryptography::CryptAcquireContextW(
+                &mut prov,
+                container as *mut _,
+                provider as *mut _,
+                type_.0,
+                self.flags,
+            );
+            if res != 0 {
                 Ok(CryptProv(prov))
             } else {
                 Err(io::Error::last_os_error())
@@ -119,51 +126,51 @@ impl AcquireOptions {
 /// An identifier of the type of cryptography provider to be used with a
 /// container.
 #[derive(Copy, Clone)]
-pub struct ProviderType(winapi::DWORD);
+pub struct ProviderType(u32);
 
 #[allow(missing_docs)]
 impl ProviderType {
     pub fn rsa_full() -> ProviderType {
-        ProviderType(wincrypt::PROV_RSA_FULL)
+        ProviderType(Cryptography::PROV_RSA_FULL)
     }
 
     pub fn rsa_aes() -> ProviderType {
-        ProviderType(wincrypt::PROV_RSA_AES)
+        ProviderType(Cryptography::PROV_RSA_AES)
     }
 
     pub fn rsa_sig() -> ProviderType {
-        ProviderType(wincrypt::PROV_RSA_SIG)
+        ProviderType(Cryptography::PROV_RSA_SIG)
     }
 
     pub fn rsa_schannel() -> ProviderType {
-        ProviderType(wincrypt::PROV_RSA_SCHANNEL)
+        ProviderType(Cryptography::PROV_RSA_SCHANNEL)
     }
 
     pub fn dss() -> ProviderType {
-        ProviderType(wincrypt::PROV_DSS)
+        ProviderType(Cryptography::PROV_DSS)
     }
 
     pub fn dss_dh() -> ProviderType {
-        ProviderType(wincrypt::PROV_DSS_DH)
+        ProviderType(Cryptography::PROV_DSS_DH)
     }
 
     pub fn dh_schannel() -> ProviderType {
-        ProviderType(wincrypt::PROV_DH_SCHANNEL)
+        ProviderType(Cryptography::PROV_DH_SCHANNEL)
     }
 
     pub fn fortezza() -> ProviderType {
-        ProviderType(wincrypt::PROV_FORTEZZA)
+        ProviderType(Cryptography::PROV_FORTEZZA)
     }
 
     pub fn ms_exchange() -> ProviderType {
-        ProviderType(wincrypt::PROV_MS_EXCHANGE)
+        ProviderType(Cryptography::PROV_MS_EXCHANGE)
     }
 
     pub fn ssl() -> ProviderType {
-        ProviderType(wincrypt::PROV_SSL)
+        ProviderType(Cryptography::PROV_SSL)
     }
 
-    pub fn as_raw(&self) -> winapi::DWORD {
+    pub fn as_raw(&self) -> u32 {
         self.0
     }
 }
@@ -171,34 +178,35 @@ impl ProviderType {
 /// A builder for key imports.
 pub struct ImportOptions<'a> {
     prov: &'a mut CryptProv,
-    flags: winapi::DWORD,
+    flags: u32,
 }
 
 impl<'a> ImportOptions<'a> {
     /// Imports a DER-encoded PKCS1 private key.
     pub fn import(&mut self, der: &[u8]) -> io::Result<CryptKey> {
         unsafe {
-            assert!(der.len() <= winapi::DWORD::max_value() as usize);
+            assert!(der.len() <= u32::max_value() as usize);
             let mut buf = ptr::null_mut();
             let mut len = 0;
-            let res = wincrypt::CryptDecodeObjectEx(wincrypt::X509_ASN_ENCODING |
-                                                    wincrypt::PKCS_7_ASN_ENCODING,
-                                                    wincrypt::PKCS_RSA_PRIVATE_KEY,
-                                                    der.as_ptr(),
-                                                    der.len() as winapi::DWORD,
-                                                    wincrypt::CRYPT_DECODE_ALLOC_FLAG,
-                                                    ptr::null_mut(),
-                                                    &mut buf as *mut _ as winapi::LPVOID,
-                                                    &mut len);
-            if res == winapi::FALSE {
+            let res = Cryptography::CryptDecodeObjectEx(
+                Cryptography::X509_ASN_ENCODING | Cryptography::PKCS_7_ASN_ENCODING,
+                Cryptography::PKCS_RSA_PRIVATE_KEY,
+                der.as_ptr(),
+                der.len() as u32,
+                Cryptography::CRYPT_DECODE_ALLOC_FLAG,
+                ptr::null_mut(),
+                &mut buf as *mut _ as *mut c_void,
+                &mut len,
+            );
+            if res == 0 {
                 return Err(io::Error::last_os_error());
             }
 
             let mut key = 0;
-            let res = wincrypt::CryptImportKey(self.prov.0, buf, len, 0, self.flags, &mut key);
-            winbase::LocalFree(buf as *mut _);
+            let res = Cryptography::CryptImportKey(self.prov.0, buf, len, 0, self.flags, &mut key);
+            Memory::LocalFree(buf as isize);
 
-            if res == winapi::TRUE {
+            if res != 0 {
                 Ok(CryptKey::from_inner(key))
             } else {
                 Err(io::Error::last_os_error())
@@ -209,28 +217,29 @@ impl<'a> ImportOptions<'a> {
     /// Imports a DER-encoded PKCS8 private key.
     pub fn import_pkcs8(&mut self, der: &[u8]) -> io::Result<CryptKey> {
         unsafe {
-            assert!(der.len() <= winapi::DWORD::max_value() as usize);
+            assert!(der.len() <= u32::max_value() as usize);
 
             // Decode the der format into a CRYPT_PRIVATE_KEY_INFO struct
             let mut buf = ptr::null_mut();
             let mut len = 0;
-            let res = wincrypt::CryptDecodeObjectEx(wincrypt::X509_ASN_ENCODING |
-                                                    wincrypt::PKCS_7_ASN_ENCODING,
-                                                    wincrypt::PKCS_PRIVATE_KEY_INFO,
-                                                    der.as_ptr(),
-                                                    der.len() as winapi::DWORD,
-                                                    wincrypt::CRYPT_DECODE_ALLOC_FLAG,
-                                                    ptr::null_mut(),
-                                                    &mut buf as *mut _ as winapi::LPVOID,
-                                                    &mut len);
-            if res == winapi::FALSE {
+            let res = Cryptography::CryptDecodeObjectEx(
+                Cryptography::X509_ASN_ENCODING | Cryptography::PKCS_7_ASN_ENCODING,
+                Cryptography::PKCS_PRIVATE_KEY_INFO,
+                der.as_ptr(),
+                der.len() as u32,
+                Cryptography::CRYPT_DECODE_ALLOC_FLAG,
+                ptr::null_mut(),
+                &mut buf as *mut _ as *mut c_void,
+                &mut len,
+            );
+            if res == 0 {
                 return Err(io::Error::last_os_error());
             }
-            let pkey: wincrypt::CRYPT_PRIVATE_KEY_INFO = *buf;
+            let pkey: Cryptography::CRYPT_PRIVATE_KEY_INFO = *buf;
             let pkey = pkey.PrivateKey;
 
-            let res = self.import(&slice::from_raw_parts(pkey.pbData, pkey.cbData as usize));
-            winbase::LocalFree(buf as *mut _);
+            let res = self.import(slice::from_raw_parts(pkey.pbData, pkey.cbData as usize));
+            Memory::LocalFree(buf as isize);
             res
         }
     }
@@ -244,41 +253,47 @@ impl<'a> ImportOptions<'a> {
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid utf-8"))?
             .trim();
 
-        if pem_str.starts_with("-----") {
-            if !pem_str.starts_with("-----BEGIN PRIVATE KEY-----") ||
-               !pem_str.ends_with("-----END PRIVATE KEY-----") {
-                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                          "expected '-----BEGIN PRIVATE KEY-----'\
-                                          and '-----END PRIVATE KEY-----' PEM guards"));
-            }
+        if pem_str.starts_with("-----")
+            && (!pem_str.starts_with("-----BEGIN PRIVATE KEY-----")
+                || !pem_str.ends_with("-----END PRIVATE KEY-----"))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "expected '-----BEGIN PRIVATE KEY-----'\
+                                          and '-----END PRIVATE KEY-----' PEM guards",
+            ));
         }
         unsafe {
-            assert!(pem.len() <= winapi::DWORD::max_value() as usize);
+            assert!(pem.len() <= u32::max_value() as usize);
 
             // Decode the pem wrapper before passing it to import_pkcs8
             // Call once first to figure out the necessary buffer size
             let mut len = 0;
-            let res = wincrypt::CryptStringToBinaryA(pem.as_ptr() as ntdef::LPCSTR,
-                                                    pem.len() as winapi::DWORD,
-                                                    wincrypt::CRYPT_STRING_BASE64_ANY,
-                                                    ptr::null_mut(),
-                                                    &mut len,
-                                                    ptr::null_mut(),
-                                                    ptr::null_mut());
-            if res == winapi::FALSE {
+            let res = Cryptography::CryptStringToBinaryA(
+                pem.as_ptr(),
+                pem.len() as u32,
+                Cryptography::CRYPT_STRING_BASE64_ANY,
+                ptr::null_mut(),
+                &mut len,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            );
+            if res == 0 {
                 return Err(io::Error::last_os_error());
             }
 
             // Call second time to actually get the DER bytes
             let mut der_buf = vec![0; len as usize];
-            let res = wincrypt::CryptStringToBinaryA(pem.as_ptr() as ntdef::LPCSTR,
-                                                    pem.len() as winapi::DWORD,
-                                                    wincrypt::CRYPT_STRING_BASE64_ANY,
-                                                    der_buf.as_mut_ptr(),
-                                                    &mut len,
-                                                    ptr::null_mut(),
-                                                    ptr::null_mut());
-            if res == winapi::FALSE {
+            let res = Cryptography::CryptStringToBinaryA(
+                pem.as_ptr(),
+                pem.len() as u32,
+                Cryptography::CRYPT_STRING_BASE64_ANY,
+                der_buf.as_mut_ptr(),
+                &mut len,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            );
+            if res == 0 {
                 return Err(io::Error::last_os_error());
             }
             self.import_pkcs8(&der_buf)
@@ -288,8 +303,9 @@ impl<'a> ImportOptions<'a> {
 
 #[cfg(test)]
 mod test {
+    use windows_sys::Win32::Security::Cryptography::CRYPT_STRING_BASE64HEADER;
+
     use super::*;
-    use winapi::shared::ntdef;
 
     #[test]
     fn rsa_key() {
@@ -299,9 +315,7 @@ mod test {
             .verify_context(true)
             .acquire(ProviderType::rsa_full())
             .unwrap();
-        context.import()
-            .import(key)
-            .unwrap();
+        context.import().import(key).unwrap();
     }
 
     #[test]
@@ -309,30 +323,38 @@ mod test {
         let key = include_str!("../test/key.pem");
         let der = unsafe {
             let mut len = 0;
-            assert!(wincrypt::CryptStringToBinaryA(key.as_ptr() as ntdef::LPCSTR,
-                                                   key.len() as winapi::DWORD,
-                                                   wincrypt::CRYPT_STRING_BASE64HEADER,
-                                                   ptr::null_mut(),
-                                                   &mut len,
-                                                   ptr::null_mut(),
-                                                   ptr::null_mut()) == winapi::TRUE);
+            assert_ne!(
+                Cryptography::CryptStringToBinaryA(
+                    key.as_ptr(),
+                    key.len() as u32,
+                    CRYPT_STRING_BASE64HEADER,
+                    ptr::null_mut(),
+                    &mut len,
+                    ptr::null_mut(),
+                    ptr::null_mut()
+                ),
+                0
+            );
             let mut buf = vec![0; len as usize];
-            assert!(wincrypt::CryptStringToBinaryA(key.as_ptr() as ntdef::LPCSTR,
-                                                   key.len() as winapi::DWORD,
-                                                   wincrypt::CRYPT_STRING_BASE64HEADER,
-                                                   buf.as_mut_ptr(),
-                                                   &mut len,
-                                                   ptr::null_mut(),
-                                                   ptr::null_mut()) == winapi::TRUE);
+            assert_ne!(
+                Cryptography::CryptStringToBinaryA(
+                    key.as_ptr(),
+                    key.len() as u32,
+                    CRYPT_STRING_BASE64HEADER,
+                    buf.as_mut_ptr(),
+                    &mut len,
+                    ptr::null_mut(),
+                    ptr::null_mut()
+                ),
+                0
+            );
             buf
         };
         let mut context = AcquireOptions::new()
             .verify_context(true)
             .acquire(ProviderType::rsa_full())
             .unwrap();
-        context.import()
-            .import_pkcs8(&der)
-            .unwrap();
+        context.import().import_pkcs8(&der).unwrap();
     }
 
     #[test]
@@ -343,9 +365,7 @@ mod test {
             .verify_context(true)
             .acquire(ProviderType::rsa_full())
             .unwrap();
-        assert!(context.import()
-            .import_pkcs8(&key[..])
-            .is_err());
+        assert!(context.import().import_pkcs8(&key[..]).is_err());
     }
 
     #[test]
@@ -355,9 +375,7 @@ mod test {
             .verify_context(true)
             .acquire(ProviderType::rsa_full())
             .unwrap();
-        context.import()
-            .import_pkcs8_pem(key)
-            .unwrap();
+        context.import().import_pkcs8_pem(key).unwrap();
     }
 
     #[test]
@@ -367,9 +385,7 @@ mod test {
             .verify_context(true)
             .acquire(ProviderType::rsa_full())
             .unwrap();
-        context.import()
-            .import_pkcs8_pem(key)
-            .unwrap();
+        context.import().import_pkcs8_pem(key).unwrap();
     }
 
     #[test]
@@ -379,9 +395,7 @@ mod test {
             .verify_context(true)
             .acquire(ProviderType::rsa_full())
             .unwrap();
-        assert!(context.import()
-            .import_pkcs8_pem(key)
-            .is_err());
+        assert!(context.import().import_pkcs8_pem(key).is_err());
     }
 
     #[test]
@@ -391,9 +405,7 @@ mod test {
             .verify_context(true)
             .acquire(ProviderType::rsa_full())
             .unwrap();
-        assert!(context.import()
-            .import_pkcs8_pem(key)
-            .is_err());
+        assert!(context.import().import_pkcs8_pem(key).is_err());
     }
 
     #[test]
@@ -403,8 +415,6 @@ mod test {
             .verify_context(true)
             .acquire(ProviderType::rsa_full())
             .unwrap();
-        assert!(context.import()
-            .import_pkcs8_pem(key)
-            .is_err());
+        assert!(context.import().import_pkcs8_pem(key).is_err());
     }
 }

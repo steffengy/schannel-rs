@@ -8,10 +8,17 @@ documentation = "https://docs.rs/schannel/0.1.19/schannel/"
 repository = "https://github.com/steffengy/schannel-rs"
 readme = "README.md"
 keywords = ["windows", "schannel", "tls", "ssl", "https"]
+edition = "2018"
 
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"
 
 [dependencies]
 lazy_static = "1.0"
-winapi = { version = "0.3", features = ["lmcons", "minschannel", "securitybaseapi", "schannel", "sspi", "sysinfoapi", "timezoneapi", "winbase", "wincrypt", "winerror"] }
+windows-sys = { version = "0.36", features = [
+    "Win32_Foundation", "Win32_Security_Cryptography",
+    "Win32_Security_Authentication_Identity", "Win32_Security_Credentials",
+    "Win32_System_Memory"] }
+
+[dev-dependencies]
+windows-sys = { version = "0.36", features = ["Win32_System_SystemInformation", "Win32_System_Time"] }

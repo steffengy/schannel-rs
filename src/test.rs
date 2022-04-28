@@ -1,25 +1,28 @@
 use std::env;
-use std::io::{self, Read, Write, Error};
+use std::io::{self, Error, Read, Write};
 use std::mem;
-use std::net::{TcpStream, TcpListener};
+use std::net::{TcpListener, TcpStream};
 use std::ptr;
-use std::sync::{Once};
+use std::sync::Once;
 use std::thread;
-use winapi::shared::minwindef as winapi;
-use winapi::shared::{basetsd, ntdef, lmcons, winerror};
-use winapi::um::{minwinbase, sysinfoapi, timezoneapi, wincrypt};
 
-use crate::Inner;
+use windows_sys::Win32::Foundation;
+use windows_sys::Win32::Security::Cryptography;
+use windows_sys::Win32::System::{SystemInformation, Time};
+
 use crate::alpn_list::AlpnList;
+use crate::cert_context::{CertContext, HashAlgorithm, KeySpec};
+use crate::cert_store::{CertAdd, CertStore, Memory};
 use crate::crypt_prov::{AcquireOptions, ProviderType};
-use crate::cert_context::{CertContext, KeySpec, HashAlgorithm};
-use crate::cert_store::{CertStore, Memory, CertAdd};
-use crate::schannel_cred::{Direction, Protocol, Algorithm, SchannelCred};
+use crate::schannel_cred::{Algorithm, Direction, Protocol, SchannelCred};
 use crate::tls_stream::{self, HandshakeError};
+use crate::Inner;
 
 #[test]
 fn basic() {
-    let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
     let mut stream = tls_stream::Builder::new()
         .domain("google.com")
@@ -37,8 +40,10 @@ fn invalid_algorithms() {
     let creds = SchannelCred::builder()
         .supported_algorithms(&[Algorithm::Rc2, Algorithm::Ecdsa])
         .acquire(Direction::Outbound);
-    assert_eq!(creds.err().unwrap().raw_os_error().unwrap(),
-               winerror::SEC_E_ALGORITHM_MISMATCH as i32);
+    assert_eq!(
+        creds.err().unwrap().raw_os_error().unwrap(),
+        Foundation::SEC_E_ALGORITHM_MISMATCH as i32
+    );
 }
 
 #[test]
@@ -80,8 +85,10 @@ fn invalid_protocol() {
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
-    assert_eq!(err.raw_os_error().unwrap(),
-               winerror::SEC_E_UNSUPPORTED_FUNCTION as i32);
+    assert_eq!(
+        err.raw_os_error().unwrap(),
+        Foundation::SEC_E_UNSUPPORTED_FUNCTION as i32
+    );
 }
 
 #[test]
@@ -132,7 +139,10 @@ fn expired_cert() {
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
-    assert_eq!(err.raw_os_error().unwrap(), winerror::CERT_E_EXPIRED as i32);
+    assert_eq!(
+        err.raw_os_error().unwrap(),
+        Foundation::CERT_E_EXPIRED as i32
+    );
 }
 
 #[test]
@@ -147,8 +157,10 @@ fn self_signed_cert() {
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
-    assert_eq!(err.raw_os_error().unwrap(),
-               winerror::CERT_E_UNTRUSTEDROOT as i32);
+    assert_eq!(
+        err.raw_os_error().unwrap(),
+        Foundation::CERT_E_UNTRUSTEDROOT as i32
+    );
 }
 
 #[test]
@@ -180,8 +192,10 @@ fn wrong_host_cert() {
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
-    assert_eq!(err.raw_os_error().unwrap(),
-               winerror::CERT_E_CN_NO_MATCH as i32);
+    assert_eq!(
+        err.raw_os_error().unwrap(),
+        Foundation::CERT_E_CN_NO_MATCH as i32
+    );
 }
 
 #[test]
@@ -199,7 +213,9 @@ fn wrong_host_cert_ignored() {
 
 #[test]
 fn shutdown() {
-    let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
     let stream = TcpStream::connect("google.com:443").unwrap();
     let mut stream = tls_stream::Builder::new()
         .domain("google.com")
@@ -210,7 +226,9 @@ fn shutdown() {
 
 #[test]
 fn validation_failure_is_permanent() {
-    let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
     let stream = TcpStream::connect("self-signed.badssl.com:443").unwrap();
     // temporarily switch to nonblocking to allow us to construct the stream
     // without validating
@@ -224,8 +242,10 @@ fn validation_failure_is_permanent() {
     };
     stream.get_ref().set_nonblocking(false).unwrap();
     let err = unwrap_handshake(stream.handshake().err().unwrap());
-    assert_eq!(err.raw_os_error().unwrap(),
-               winerror::CERT_E_UNTRUSTEDROOT as i32);
+    assert_eq!(
+        err.raw_os_error().unwrap(),
+        Foundation::CERT_E_UNTRUSTEDROOT as i32
+    );
 }
 
 #[test]
@@ -242,7 +262,9 @@ fn verify_callback_success() {
         })
         .connect(creds, stream)
         .unwrap();
-    stream.write_all(b"GET / HTTP/1.0\r\nHost: self-signed.badssl.com\r\n\r\n").unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.0\r\nHost: self-signed.badssl.com\r\n\r\n")
+        .unwrap();
     let mut out = vec![];
     stream.read_to_end(&mut out).unwrap();
     assert!(out.starts_with(b"HTTP/1.1 200 OK"));
@@ -259,14 +281,18 @@ fn verify_callback_error() {
         .domain("google.com")
         .verify_callback(|validation_result| {
             assert!(validation_result.result().is_ok());
-            Err(io::Error::from_raw_os_error(winerror::CERT_E_UNTRUSTEDROOT))
+            Err(io::Error::from_raw_os_error(
+                Foundation::CERT_E_UNTRUSTEDROOT,
+            ))
         })
         .connect(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
-    assert_eq!(err.raw_os_error().unwrap(),
-               winerror::CERT_E_UNTRUSTEDROOT as i32);
+    assert_eq!(
+        err.raw_os_error().unwrap(),
+        Foundation::CERT_E_UNTRUSTEDROOT as i32
+    );
 }
 
 #[test]
@@ -278,22 +304,38 @@ fn verify_callback_gives_failed_cert() {
     let err = tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
         .verify_callback(|validation_result| {
-            let expected_finger = vec![0x30, 0x3e, 0xab, 0xd4, 0xef, 0xe3, 0xb1, 0x29, 0xe5, 0x6b, 0xb5, 0x41, 0x32, 0x49, 0x27, 0x77, 0xd5, 0x7b, 0x71, 0x16];
-            assert_eq!(validation_result.failed_certificate().unwrap().fingerprint(HashAlgorithm::sha1()).unwrap(), expected_finger);
-            Err(io::Error::from_raw_os_error(winerror::CERT_E_UNTRUSTEDROOT))
+            let expected_finger = vec![
+                0x30, 0x3e, 0xab, 0xd4, 0xef, 0xe3, 0xb1, 0x29, 0xe5, 0x6b, 0xb5, 0x41, 0x32, 0x49,
+                0x27, 0x77, 0xd5, 0x7b, 0x71, 0x16,
+            ];
+            assert_eq!(
+                validation_result
+                    .failed_certificate()
+                    .unwrap()
+                    .fingerprint(HashAlgorithm::sha1())
+                    .unwrap(),
+                expected_finger
+            );
+            Err(io::Error::from_raw_os_error(
+                Foundation::CERT_E_UNTRUSTEDROOT,
+            ))
         })
         .connect(creds, stream)
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
-    assert_eq!(err.raw_os_error().unwrap(),
-               winerror::CERT_E_UNTRUSTEDROOT as i32);
+    assert_eq!(
+        err.raw_os_error().unwrap(),
+        Foundation::CERT_E_UNTRUSTEDROOT as i32
+    );
 }
 
 #[test]
 fn no_session_resumed() {
     for _ in 0..2 {
-        let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
+        let creds = SchannelCred::builder()
+            .acquire(Direction::Outbound)
+            .unwrap();
         let stream = TcpStream::connect("google.com:443").unwrap();
         let stream = tls_stream::Builder::new()
             .domain("google.com")
@@ -305,7 +347,9 @@ fn no_session_resumed() {
 
 #[test]
 fn basic_session_resumed() {
-    let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
     let creds_copy = creds.clone();
 
     let stream = TcpStream::connect("google.com:443").unwrap();
@@ -325,7 +369,9 @@ fn basic_session_resumed() {
 
 #[test]
 fn session_resumption_thread_safety() {
-    let creds = SchannelCred::builder().acquire(Direction::Outbound).unwrap();
+    let creds = SchannelCred::builder()
+        .acquire(Direction::Outbound)
+        .unwrap();
 
     // Connect once so that the session ticket is cached.
     let creds_copy = creds.clone();
@@ -357,11 +403,13 @@ fn session_resumption_thread_safety() {
     }
 }
 
-const FRIENDLY_NAME: &'static str = "schannel-rs localhost testing cert";
+const FRIENDLY_NAME: &str = "schannel-rs localhost testing cert";
 
 lazy_static! {
-    static ref szOID_RSA_SHA256RSA: Vec<u8> =
-        wincrypt::szOID_RSA_SHA256RSA.bytes().chain(Some(0)).collect();
+    static ref szOID_RSA_SHA256RSA: Vec<u8> = Cryptography::szOID_RSA_SHA256RSA
+        .bytes()
+        .chain(Some(0))
+        .collect();
 }
 
 fn install_certificate() -> io::Result<CertContext> {
@@ -369,98 +417,108 @@ fn install_certificate() -> io::Result<CertContext> {
         let mut provider = 0;
         let mut hkey = 0;
 
-        let mut buffer = "schannel-rs test suite".encode_utf16()
-                                                 .chain(Some(0))
-                                                 .collect::<Vec<_>>();
-        let res = wincrypt::CryptAcquireContextW(&mut provider,
-                                                 buffer.as_ptr(),
-                                                 ptr::null_mut(),
-                                                 wincrypt::PROV_RSA_FULL,
-                                                 wincrypt::CRYPT_MACHINE_KEYSET);
-        if res != winapi::TRUE {
+        let mut buffer = "schannel-rs test suite"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect::<Vec<_>>();
+        let res = Cryptography::CryptAcquireContextW(
+            &mut provider,
+            buffer.as_ptr(),
+            ptr::null(),
+            Cryptography::PROV_RSA_FULL,
+            Cryptography::CRYPT_MACHINE_KEYSET,
+        );
+        if res == 0 {
             // create a new key container (since it does not exist)
-            let res = wincrypt::CryptAcquireContextW(&mut provider,
-                                                     buffer.as_ptr(),
-                                                     ptr::null_mut(),
-                                                     wincrypt::PROV_RSA_FULL,
-                                                     wincrypt::CRYPT_NEWKEYSET | wincrypt::CRYPT_MACHINE_KEYSET);
-            if res != winapi::TRUE {
-                return Err(Error::last_os_error())
+            let res = Cryptography::CryptAcquireContextW(
+                &mut provider,
+                buffer.as_ptr(),
+                ptr::null(),
+                Cryptography::PROV_RSA_FULL,
+                Cryptography::CRYPT_NEWKEYSET | Cryptography::CRYPT_MACHINE_KEYSET,
+            );
+            if res == 0 {
+                return Err(Error::last_os_error());
             }
         }
 
         // create a new keypair (RSA-2048)
-        let res = wincrypt::CryptGenKey(provider,
-                                        wincrypt::AT_SIGNATURE,
-                                        0x0800<<16 | wincrypt::CRYPT_EXPORTABLE,
-                                        &mut hkey);
-        if res != winapi::TRUE {
+        let res = Cryptography::CryptGenKey(
+            provider,
+            Cryptography::AT_SIGNATURE,
+            0x0800 << 16 | Cryptography::CRYPT_EXPORTABLE,
+            &mut hkey,
+        );
+        if res == 0 {
             return Err(Error::last_os_error());
         }
 
         // start creating the certificate
-        let name = "CN=localhost,O=schannel-rs,OU=schannel-rs,G=schannel_rs".encode_utf16()
-                                               .chain(Some(0))
-                                               .collect::<Vec<_>>();
-        let mut cname_buffer: [ntdef::WCHAR; lmcons::UNLEN as usize + 1] = mem::zeroed();
-        let mut cname_len = cname_buffer.len() as winapi::DWORD;
-        let res = wincrypt::CertStrToNameW(wincrypt::X509_ASN_ENCODING,
-                                           name.as_ptr(),
-                                           wincrypt::CERT_X500_NAME_STR,
-                                           ptr::null_mut(),
-                                           cname_buffer.as_mut_ptr() as *mut u8,
-                                           &mut cname_len,
-                                           ptr::null_mut());
-        if res != winapi::TRUE {
+        let name = "CN=localhost,O=schannel-rs,OU=schannel-rs,G=schannel_rs"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect::<Vec<_>>();
+        let mut cname_buffer: [u16; 257] = mem::zeroed();
+        let mut cname_len = cname_buffer.len() as u32;
+        let res = Cryptography::CertStrToNameW(
+            Cryptography::X509_ASN_ENCODING,
+            name.as_ptr(),
+            Cryptography::CERT_X500_NAME_STR,
+            ptr::null_mut(),
+            cname_buffer.as_mut_ptr() as *mut u8,
+            &mut cname_len,
+            ptr::null_mut(),
+        );
+        if res == 0 {
             return Err(Error::last_os_error());
         }
 
-        let mut subject_issuer = wincrypt::CERT_NAME_BLOB {
+        let subject_issuer = Cryptography::CRYPTOAPI_BLOB {
             cbData: cname_len,
             pbData: cname_buffer.as_ptr() as *mut u8,
         };
-        let mut key_provider = wincrypt::CRYPT_KEY_PROV_INFO {
+        let key_provider = Cryptography::CRYPT_KEY_PROV_INFO {
             pwszContainerName: buffer.as_mut_ptr(),
             pwszProvName: ptr::null_mut(),
-            dwProvType: wincrypt::PROV_RSA_FULL,
-            dwFlags: wincrypt::CRYPT_MACHINE_KEYSET,
+            dwProvType: Cryptography::PROV_RSA_FULL,
+            dwFlags: Cryptography::CRYPT_MACHINE_KEYSET,
             cProvParam: 0,
             rgProvParam: ptr::null_mut(),
-            dwKeySpec: wincrypt::AT_SIGNATURE,
+            dwKeySpec: Cryptography::AT_SIGNATURE,
         };
-        let mut sig_algorithm = wincrypt::CRYPT_ALGORITHM_IDENTIFIER {
+        let sig_algorithm = Cryptography::CRYPT_ALGORITHM_IDENTIFIER {
             pszObjId: szOID_RSA_SHA256RSA.as_ptr() as *mut _,
             Parameters: mem::zeroed(),
         };
-        let mut expiration_date: minwinbase::SYSTEMTIME = mem::zeroed();
-        sysinfoapi::GetSystemTime(&mut expiration_date);
-        let mut file_time: winapi::FILETIME = mem::zeroed();
-        let res = timezoneapi::SystemTimeToFileTime(&mut expiration_date,
-                                                    &mut file_time);
-        if res != winapi::TRUE {
+        let mut expiration_date: Foundation::SYSTEMTIME = mem::zeroed();
+        SystemInformation::GetSystemTime(&mut expiration_date);
+        let mut file_time: Foundation::FILETIME = mem::zeroed();
+        let res = Time::SystemTimeToFileTime(&expiration_date, &mut file_time);
+        if res == 0 {
             return Err(Error::last_os_error());
         }
-        let mut timestamp: u64 = file_time.dwLowDateTime as u64 |
-                                 (file_time.dwHighDateTime as u64) << 32;
+        let mut timestamp: u64 =
+            file_time.dwLowDateTime as u64 | (file_time.dwHighDateTime as u64) << 32;
         // one day, timestamp unit is in 100 nanosecond intervals
         timestamp += (1E9 as u64) / 100 * (60 * 60 * 24);
         file_time.dwLowDateTime = timestamp as u32;
         file_time.dwHighDateTime = (timestamp >> 32) as u32;
-        let res = timezoneapi::FileTimeToSystemTime(&file_time,
-                                                    &mut expiration_date);
-        if res != winapi::TRUE {
+        let res = Time::FileTimeToSystemTime(&file_time, &mut expiration_date);
+        if res == 0 {
             return Err(Error::last_os_error());
         }
 
         // create a self signed certificate
-        let cert_context = wincrypt::CertCreateSelfSignCertificate(0 as basetsd::ULONG_PTR,
-                                                                   &mut subject_issuer,
-                                                                   0,
-                                                                   &mut key_provider,
-                                                                   &mut sig_algorithm,
-                                                                   ptr::null_mut(),
-                                                                   &mut expiration_date,
-                                                                   ptr::null_mut());
+        let cert_context = Cryptography::CertCreateSelfSignCertificate(
+            Cryptography::HCRYPTPROV_OR_NCRYPT_KEY_HANDLE::default(),
+            &subject_issuer,
+            Cryptography::CERT_CREATE_SELFSIGN_FLAGS::default(),
+            &key_provider,
+            &sig_algorithm,
+            ptr::null_mut(),
+            &expiration_date,
+            ptr::null_mut(),
+        );
         if cert_context.is_null() {
             return Err(Error::last_os_error());
         }
@@ -468,7 +526,9 @@ fn install_certificate() -> io::Result<CertContext> {
         cert_context.set_friendly_name(FRIENDLY_NAME)?;
 
         // install the certificate to the machine's local store
-        io::stdout().write_all(br#"
+        io::stdout()
+            .write_all(
+                br#"
 
 The schannel-rs test suite is about to add a certificate to your set of root
 and trusted certificates. This certificate should be for the domain "localhost"
@@ -479,7 +539,9 @@ suite later.
 If you would rather not do this please cancel the addition and re-run the
 test suite with SCHANNEL_RS_SKIP_SERVER_TESTS=1.
 
-"#).unwrap();
+"#,
+            )
+            .unwrap();
         local_root_store().add_cert(&cert_context, CertAdd::ReplaceExisting)?;
         Ok(cert_context)
     }
@@ -495,7 +557,7 @@ fn local_root_store() -> CertStore {
 
 fn localhost_cert() -> Option<CertContext> {
     if env::var("SCHANNEL_RS_SKIP_SERVER_TESTS").is_ok() {
-        return None
+        return None;
     }
 
     // Our tests need a certficiate that the system trusts to run with, and we
@@ -523,20 +585,24 @@ fn localhost_cert() -> Option<CertContext> {
                 Err(_) => continue,
             };
             if name != FRIENDLY_NAME {
-                continue
+                continue;
             }
             if !cert.is_time_valid().unwrap() {
-                io::stdout().write_all(br#"
+                io::stdout()
+                    .write_all(
+                        br#"
 
 The schannel-rs test suite is about to delete an old copy of one of its
 certificates from your root trust store. This certificate was only valid for one
 day and it is no longer needed. The host should be "localhost" and the
 description should mention "schannel".
 
-"#).unwrap();
+"#,
+                    )
+                    .unwrap();
                 cert.delete().unwrap();
             } else {
-                return
+                return;
             }
         }
 
@@ -549,7 +615,7 @@ description should mention "schannel".
             Err(_) => continue,
         };
         if name == FRIENDLY_NAME {
-            return Some(cert)
+            return Some(cert);
         }
     }
 
@@ -568,7 +634,8 @@ fn accept_a_socket() {
     let t = thread::spawn(move || {
         let stream = TcpStream::connect(&addr).unwrap();
         let creds = SchannelCred::builder()
-                                 .acquire(Direction::Outbound).unwrap();
+            .acquire(Direction::Outbound)
+            .unwrap();
         let mut stream = tls_stream::Builder::new()
             .domain("localhost")
             .connect(creds, stream)
@@ -581,12 +648,10 @@ fn accept_a_socket() {
 
     let stream = listener.accept().unwrap().0;
     let creds = SchannelCred::builder()
-                        .cert(cert)
-                        .acquire(Direction::Inbound)
-                        .unwrap();
-    let mut stream = tls_stream::Builder::new()
-        .accept(creds, stream)
+        .cert(cert)
+        .acquire(Direction::Inbound)
         .unwrap();
+    let mut stream = tls_stream::Builder::new().accept(creds, stream).unwrap();
     assert_eq!(stream.read(&mut [0; 1024]).unwrap(), 4);
     stream.write_all(&[1, 2, 3, 4]).unwrap();
     stream.flush().unwrap();
@@ -629,7 +694,8 @@ fn accept_one_byte_at_a_time() {
     let t = thread::spawn(move || {
         let stream = TcpStream::connect(&addr).unwrap();
         let creds = SchannelCred::builder()
-                                 .acquire(Direction::Outbound).unwrap();
+            .acquire(Direction::Outbound)
+            .unwrap();
         let mut stream = tls_stream::Builder::new()
             .domain("localhost")
             .connect(creds, OneByteAtATime { inner: stream })
@@ -642,9 +708,9 @@ fn accept_one_byte_at_a_time() {
 
     let stream = listener.accept().unwrap().0;
     let creds = SchannelCred::builder()
-                        .cert(cert)
-                        .acquire(Direction::Inbound)
-                        .unwrap();
+        .cert(cert)
+        .acquire(Direction::Inbound)
+        .unwrap();
     let mut stream = tls_stream::Builder::new()
         .accept(creds, OneByteAtATime { inner: stream })
         .unwrap();
@@ -669,7 +735,8 @@ fn split_cert_key() {
 
         let stream = TcpStream::connect(&addr).unwrap();
         let creds = SchannelCred::builder()
-                                 .acquire(Direction::Outbound).unwrap();
+            .acquire(Direction::Outbound)
+            .unwrap();
         let mut stream = tls_stream::Builder::new()
             .domain("foobar.com")
             .cert_store(store)
@@ -693,9 +760,7 @@ fn split_cert_key() {
         Err(_) => options.new_keyset(true).acquire(type_).unwrap(),
     };
     let key = include_bytes!("../test/key.key");
-    container.import()
-        .import(key)
-        .unwrap();
+    container.import().import(key).unwrap();
 
     cert.set_key_prov_info()
         .container("schannel-test")
@@ -707,12 +772,10 @@ fn split_cert_key() {
 
     let stream = listener.accept().unwrap().0;
     let creds = SchannelCred::builder()
-                        .cert(cert)
-                        .acquire(Direction::Inbound)
-                        .unwrap();
-    let mut stream = tls_stream::Builder::new()
-        .accept(creds, stream)
+        .cert(cert)
+        .acquire(Direction::Inbound)
         .unwrap();
+    let mut stream = tls_stream::Builder::new().accept(creds, stream).unwrap();
     assert_eq!(stream.read(&mut [0; 1024]).unwrap(), 4);
     stream.write_all(&[1, 2, 3, 4]).unwrap();
     stream.flush().unwrap();
@@ -846,8 +909,11 @@ fn test_alpn_list() {
         raw_proto_alpn_list,
     ]
     .concat();
-    let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], &proto_list].concat();
-    assert_eq!(&AlpnList::new(&vec![b"h2".to_vec()]) as &[u8], &full_alpn_list as &[u8]);
+    let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], proto_list].concat();
+    assert_eq!(
+        &AlpnList::new(&[b"h2".to_vec()]) as &[u8],
+        &full_alpn_list as &[u8]
+    );
 
     let raw_proto_alpn_list = b"\x02h2\x08http/1.1";
     // Little-endian bit representation of the expected `SEC_APPLICATION_PROTOCOL_LIST`.
@@ -857,6 +923,9 @@ fn test_alpn_list() {
         raw_proto_alpn_list,
     ]
     .concat();
-    let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], &proto_list].concat();
-    assert_eq!(&AlpnList::new(&vec![b"h2".to_vec(), b"http/1.1".to_vec()]) as &[u8], &full_alpn_list as &[u8]);
+    let full_alpn_list = [&[proto_list.len() as u8, 0, 0, 0] as &[u8], proto_list].concat();
+    assert_eq!(
+        &AlpnList::new(&[b"h2".to_vec(), b"http/1.1".to_vec()]) as &[u8],
+        &full_alpn_list as &[u8]
+    );
 }

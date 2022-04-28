@@ -2,17 +2,17 @@ use std::alloc;
 use std::mem;
 use std::ptr;
 use std::slice;
-use winapi::ctypes;
-use winapi::shared::sspi;
+
+use windows_sys::Win32::Security::Authentication::Identity;
 
 // This is manually calculated here rather than using `size_of::<SEC_APPLICATION_PROTOCOL_LIST>()`,
 // as the latter is 2 bytes too large because it accounts for padding at the end of the struct for
 // alignment requirements, which is irrelevant in actual usage because there is a variable-length
 // array at the end of the struct.
 const SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE: usize =
-    mem::size_of::<u32>() + mem::size_of::<ctypes::c_ushort>();
+    mem::size_of::<u32>() + mem::size_of::<u16>();
 const SEC_APPLICATION_PROTOCOL_HEADER_SIZE: usize =
-    mem::size_of::<ctypes::c_ulong>() + SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE;
+    mem::size_of::<u32>() + SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE;
 
 pub struct AlpnList {
     layout: alloc::Layout,
@@ -31,9 +31,8 @@ impl Drop for AlpnList {
 impl AlpnList {
     pub fn new(protos: &[Vec<u8>]) -> Self {
         // ALPN wire format is each ALPN preceded by its length as a byte.
-        let mut alpn_wire_format = Vec::with_capacity(
-            protos.iter().map(Vec::len).sum::<usize>() + protos.len(),
-        );
+        let mut alpn_wire_format =
+            Vec::with_capacity(protos.iter().map(Vec::len).sum::<usize>() + protos.len());
         for alpn in protos {
             alpn_wire_format.push(alpn.len() as u8);
             alpn_wire_format.extend(alpn);
@@ -42,8 +41,9 @@ impl AlpnList {
         let size = SEC_APPLICATION_PROTOCOL_HEADER_SIZE + alpn_wire_format.len();
         let layout = alloc::Layout::from_size_align(
             size,
-            mem::align_of::<sspi::SEC_APPLICATION_PROTOCOLS>(),
-        ).unwrap();
+            mem::align_of::<Identity::SEC_APPLICATION_PROTOCOLS>(),
+        )
+        .unwrap();
 
         unsafe {
             // Safety: `layout` is guaranteed to have non-zero size.
@@ -54,22 +54,20 @@ impl AlpnList {
 
             // Safety: `memory` was created from `layout`.
             let buf = slice::from_raw_parts_mut(memory.as_ptr(), layout.size());
-            let protocols = &mut *(buf.as_mut_ptr() as *mut sspi::SEC_APPLICATION_PROTOCOLS);
+            let protocols = &mut *(buf.as_mut_ptr() as *mut Identity::SEC_APPLICATION_PROTOCOLS);
             protocols.ProtocolListsSize =
-                (SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + alpn_wire_format.len()) as ctypes::c_ulong;
+                (SEC_APPLICATION_PROTOCOL_LIST_HEADER_SIZE + alpn_wire_format.len()) as u32;
 
             let protocol = &mut *protocols.ProtocolLists.as_mut_ptr();
-            protocol.ProtoNegoExt = sspi::SecApplicationProtocolNegotiationExt_ALPN;
-            protocol.ProtocolListSize = alpn_wire_format.len() as ctypes::c_ushort;
+            protocol.ProtoNegoExt = Identity::SecApplicationProtocolNegotiationExt_ALPN;
+            protocol.ProtocolListSize = alpn_wire_format.len() as u16;
 
-            let protocol_list_offset = protocol.ProtocolList.as_ptr() as usize - buf.as_ptr() as usize;
+            let protocol_list_offset =
+                protocol.ProtocolList.as_ptr() as usize - buf.as_ptr() as usize;
             let protocol_list = &mut buf[protocol_list_offset..];
             protocol_list.copy_from_slice(&alpn_wire_format);
 
-            Self {
-                layout,
-                memory,
-            }
+            Self { layout, memory }
         }
     }
 }

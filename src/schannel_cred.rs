@@ -1,17 +1,17 @@
 //! Schannel credentials.
-use winapi::shared::{sspi, winerror};
-use winapi::shared::minwindef as winapi;
-use winapi::um::{self, wincrypt};
-use std::io;
-use std::mem;
 use std::ptr;
 use std::sync::Arc;
+use std::{io, mem};
 
-use crate::Inner;
+use windows_sys::Win32::Foundation;
+use windows_sys::Win32::Security::Authentication::Identity;
+use windows_sys::Win32::Security::{Credentials, Cryptography};
+
 use crate::cert_context::CertContext;
+use crate::Inner;
 
 lazy_static! {
-    static ref UNISP_NAME: Vec<u8> = um::schannel::UNISP_NAME.bytes().chain(Some(0)).collect();
+    static ref UNISP_NAME: Vec<u8> = Identity::UNISP_NAME.bytes().chain(Some(0)).collect();
 }
 
 /// The communication direction that an `SchannelCred` will support.
@@ -27,80 +27,130 @@ pub enum Direction {
 // https://msdn.microsoft.com/en-us/library/windows/desktop/aa375549(v=vs.85).aspx
 #[derive(Debug, Copy, Clone)]
 #[repr(u32)]
+#[non_exhaustive]
 pub enum Algorithm {
     /// Advanced Encryption Standard (AES).
-    Aes = wincrypt::CALG_AES,
+    Aes = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_AES,
     /// 128 bit AES.
-    Aes128 = wincrypt::CALG_AES_128,
+    Aes128 = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_AES_128,
     /// 192 bit AES.
-    Aes192 = wincrypt::CALG_AES_192,
+    Aes192 = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_AES_192,
     /// 256 bit AES.
-    Aes256 = wincrypt::CALG_AES_256,
+    Aes256 = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_AES_256,
     /// Temporary algorithm identifier for handles of Diffie-Hellman–agreed keys.
-    AgreedkeyAny = wincrypt::CALG_AGREEDKEY_ANY,
+    AgreedkeyAny = Cryptography::ALG_CLASS_KEY_EXCHANGE
+        | Cryptography::ALG_TYPE_DH
+        | Cryptography::ALG_SID_AGREED_KEY_ANY,
     /// An algorithm to create a 40-bit DES key that has parity bits and zeroed key bits to make
     /// its key length 64 bits.
-    CylinkMek = wincrypt::CALG_CYLINK_MEK,
+    CylinkMek = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_CYLINK_MEK,
     /// DES encryption algorithm.
-    Des = wincrypt::CALG_DES,
+    Des = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_DES,
     /// DESX encryption algorithm.
-    Desx = wincrypt::CALG_DESX,
+    Desx = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_DESX,
     /// Diffie-Hellman ephemeral key exchange algorithm.
-    DhEphem = wincrypt::CALG_DH_EPHEM,
+    DhEphem = Cryptography::ALG_CLASS_KEY_EXCHANGE
+        | Cryptography::ALG_TYPE_DH
+        | Cryptography::ALG_SID_DH_EPHEM,
     /// Diffie-Hellman store and forward key exchange algorithm.
-    DhSf = wincrypt::CALG_DH_SF,
+    DhSf = Cryptography::ALG_CLASS_KEY_EXCHANGE
+        | Cryptography::ALG_TYPE_DH
+        | Cryptography::ALG_SID_DH_SANDF,
     /// DSA public key signature algorithm.
-    DssSign = wincrypt::CALG_DSS_SIGN,
+    DssSign = Cryptography::ALG_CLASS_SIGNATURE
+        | Cryptography::ALG_TYPE_DSS
+        | Cryptography::ALG_SID_DSS_ANY,
     /// Elliptic curve Diffie-Hellman key exchange algorithm.
-    Ecdh = wincrypt::CALG_ECDH,
+    Ecdh = Cryptography::ALG_CLASS_KEY_EXCHANGE
+        | Cryptography::ALG_TYPE_DH
+        | Cryptography::ALG_SID_ECDH,
     /// Ephemeral elliptic curve Diffie-Hellman key exchange algorithm.
-    EcdhEphem = wincrypt::CALG_ECDH_EPHEM,
+    EcdhEphem = Cryptography::ALG_CLASS_KEY_EXCHANGE
+        | Cryptography::ALG_TYPE_ECDH
+        | Cryptography::ALG_SID_ECDH_EPHEM,
     /// Elliptic curve digital signature algorithm.
-    Ecdsa = wincrypt::CALG_ECDSA,
+    Ecdsa = Cryptography::ALG_CLASS_SIGNATURE
+        | Cryptography::ALG_TYPE_DSS
+        | Cryptography::ALG_SID_ECDSA,
     /// One way function hashing algorithm.
-    HashReplaceOwf = wincrypt::CALG_HASH_REPLACE_OWF,
+    HashReplaceOwf = Cryptography::ALG_CLASS_HASH
+        | Cryptography::ALG_TYPE_ANY
+        | Cryptography::ALG_SID_HASH_REPLACE_OWF,
     /// Hughes MD5 hashing algorithm.
-    HughesMd5 = wincrypt::CALG_HUGHES_MD5,
+    HughesMd5 = Cryptography::ALG_CLASS_KEY_EXCHANGE
+        | Cryptography::ALG_TYPE_ANY
+        | Cryptography::ALG_SID_MD5,
     /// HMAC keyed hash algorithm.
-    Hmac = wincrypt::CALG_HMAC,
+    Hmac = Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_HMAC,
     /// MAC keyed hash algorithm.
-    Mac = wincrypt::CALG_MAC,
+    Mac = Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_MAC,
     /// MD2 hashing algorithm.
-    Md2 = wincrypt::CALG_MD2,
+    Md2 = Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_MD2,
     /// MD4 hashing algorithm.
-    Md4 = wincrypt::CALG_MD4,
+    Md4 = Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_MD4,
     /// MD5 hashing algorithm.
-    Md5 = wincrypt::CALG_MD5,
+    Md5 = Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_MD5,
     /// No signature algorithm..
-    NoSign = wincrypt::CALG_NO_SIGN,
+    NoSign =
+        Cryptography::ALG_CLASS_SIGNATURE | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_ANY,
     /// RC2 block encryption algorithm.
-    Rc2 = wincrypt::CALG_RC2,
+    Rc2 = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_RC2,
     /// RC4 stream encryption algorithm.
-    Rc4 = wincrypt::CALG_RC4,
+    Rc4 = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_STREAM
+        | Cryptography::ALG_SID_RC4,
     /// RC5 block encryption algorithm.
-    Rc5 = wincrypt::CALG_RC5,
+    Rc5 = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_RC5,
     /// RSA public key exchange algorithm.
-    RsaKeyx = wincrypt::CALG_RSA_KEYX,
+    RsaKeyx = Cryptography::ALG_CLASS_KEY_EXCHANGE
+        | Cryptography::ALG_TYPE_RSA
+        | Cryptography::ALG_SID_RSA_ANY,
     /// RSA public key signature algorithm.
-    RsaSign = wincrypt::CALG_RSA_SIGN,
+    RsaSign = Cryptography::ALG_CLASS_SIGNATURE
+        | Cryptography::ALG_TYPE_RSA
+        | Cryptography::ALG_SID_RSA_ANY,
     /// SHA hashing algorithm.
-    Sha1 = wincrypt::CALG_SHA1,
+    Sha1 = Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_SHA1,
     /// 256 bit SHA hashing algorithm.
-    Sha256 = wincrypt::CALG_SHA_256,
+    Sha256 =
+        Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_SHA_256,
     /// 384 bit SHA hashing algorithm.
-    Sha384 = wincrypt::CALG_SHA_384,
+    Sha384 =
+        Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_SHA_384,
     /// 512 bit SHA hashing algorithm.
-    Sha512 = wincrypt::CALG_SHA_512,
+    Sha512 =
+        Cryptography::ALG_CLASS_HASH | Cryptography::ALG_TYPE_ANY | Cryptography::ALG_SID_SHA_512,
     /// Triple DES encryption algorithm.
-    TripleDes = wincrypt::CALG_3DES,
+    TripleDes = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_3DES,
     /// Two-key triple DES encryption with effective key length equal to 112 bits.
-    TripleDes112 = wincrypt::CALG_3DES_112,
-    #[doc(hidden)]
-    __ForExtensibility,
+    TripleDes112 = Cryptography::ALG_CLASS_DATA_ENCRYPT
+        | Cryptography::ALG_TYPE_BLOCK
+        | Cryptography::ALG_SID_3DES_112,
 }
 
 /// Protocols supported by Schannel.
 #[derive(Debug, Copy, Clone)]
+#[non_exhaustive]
 pub enum Protocol {
     /// Secure Sockets Layer 3.0
     Ssl3,
@@ -110,22 +160,23 @@ pub enum Protocol {
     Tls11,
     /// Transport Layer Security 1.2
     Tls12,
-    #[doc(hidden)]
-    __ForExtensibility,
+    /// Transport Layer Security 1.3
+    Tls13,
 }
 
 impl Protocol {
-    fn dword(self, direction: Direction) -> winapi::DWORD {
+    fn dword(self, direction: Direction) -> u32 {
         match (self, direction) {
-            (Protocol::Ssl3, Direction::Inbound) => um::schannel::SP_PROT_SSL3_SERVER,
-            (Protocol::Tls10, Direction::Inbound) => um::schannel::SP_PROT_TLS1_0_SERVER,
-            (Protocol::Tls11, Direction::Inbound) => um::schannel::SP_PROT_TLS1_1_SERVER,
-            (Protocol::Tls12, Direction::Inbound) => um::schannel::SP_PROT_TLS1_2_SERVER,
-            (Protocol::Ssl3, Direction::Outbound) => um::schannel::SP_PROT_SSL3_CLIENT,
-            (Protocol::Tls10, Direction::Outbound) => um::schannel::SP_PROT_TLS1_0_CLIENT,
-            (Protocol::Tls11, Direction::Outbound) => um::schannel::SP_PROT_TLS1_1_CLIENT,
-            (Protocol::Tls12, Direction::Outbound) => um::schannel::SP_PROT_TLS1_2_CLIENT,
-            (Protocol::__ForExtensibility, _) => unreachable!(),
+            (Protocol::Ssl3, Direction::Inbound) => Identity::SP_PROT_SSL3_SERVER,
+            (Protocol::Tls10, Direction::Inbound) => Identity::SP_PROT_TLS1_0_SERVER,
+            (Protocol::Tls11, Direction::Inbound) => Identity::SP_PROT_TLS1_1_SERVER,
+            (Protocol::Tls12, Direction::Inbound) => Identity::SP_PROT_TLS1_2_SERVER,
+            (Protocol::Tls13, Direction::Inbound) => Identity::SP_PROT_TLS1_3_SERVER,
+            (Protocol::Ssl3, Direction::Outbound) => Identity::SP_PROT_SSL3_CLIENT,
+            (Protocol::Tls10, Direction::Outbound) => Identity::SP_PROT_TLS1_0_CLIENT,
+            (Protocol::Tls11, Direction::Outbound) => Identity::SP_PROT_TLS1_1_CLIENT,
+            (Protocol::Tls12, Direction::Outbound) => Identity::SP_PROT_TLS1_2_CLIENT,
+            (Protocol::Tls13, Direction::Outbound) => Identity::SP_PROT_TLS1_3_CLIENT,
         }
     }
 }
@@ -145,31 +196,13 @@ impl Builder {
     }
 
     /// Sets the algorithms supported for credentials created from this builder.
-    pub fn supported_algorithms(&mut self,
-                                supported_algorithms: &[Algorithm])
-                                -> &mut Builder {
-        assert!(supported_algorithms.iter()
-            .all(|a| {
-                match *a {
-                    Algorithm::__ForExtensibility => false,
-                    _ => true,
-                }
-            }));
+    pub fn supported_algorithms(&mut self, supported_algorithms: &[Algorithm]) -> &mut Builder {
         self.supported_algorithms = Some(supported_algorithms.to_owned());
         self
     }
 
     /// Sets the protocols enabled for credentials created from this builder.
-    pub fn enabled_protocols(&mut self,
-                             enabled_protocols: &[Protocol])
-                             -> &mut Builder {
-        assert!(enabled_protocols.iter()
-            .all(|a| {
-                match *a {
-                    Protocol::__ForExtensibility => false,
-                    _ => true,
-                }
-            }));
+    pub fn enabled_protocols(&mut self, enabled_protocols: &[Protocol]) -> &mut Builder {
         self.enabled_protocols = Some(enabled_protocols.to_owned());
         self
     }
@@ -191,39 +224,43 @@ impl Builder {
     /// Creates a new `SchannelCred`.
     pub fn acquire(&self, direction: Direction) -> io::Result<SchannelCred> {
         unsafe {
-            let mut handle = mem::zeroed();
-            let mut cred_data: um::schannel::SCHANNEL_CRED = mem::zeroed();
-            cred_data.dwVersion = um::schannel::SCHANNEL_CRED_VERSION;
-            cred_data.dwFlags = um::schannel::SCH_USE_STRONG_CRYPTO | um::schannel::SCH_CRED_NO_DEFAULT_CREDS;
+            let mut handle: Credentials::SecHandle = mem::zeroed();
+            let mut cred_data: Identity::SCHANNEL_CRED = mem::zeroed();
+            cred_data.dwVersion = Identity::SCHANNEL_CRED_VERSION;
+            cred_data.dwFlags =
+                Identity::SCH_USE_STRONG_CRYPTO | Identity::SCH_CRED_NO_DEFAULT_CREDS;
             if let Some(ref supported_algorithms) = self.supported_algorithms {
-                cred_data.cSupportedAlgs = supported_algorithms.len() as winapi::DWORD;
+                cred_data.cSupportedAlgs = supported_algorithms.len() as u32;
                 cred_data.palgSupportedAlgs = supported_algorithms.as_ptr() as *mut _;
             }
             if let Some(ref enabled_protocols) = self.enabled_protocols {
-                cred_data.grbitEnabledProtocols = enabled_protocols.iter()
+                cred_data.grbitEnabledProtocols = enabled_protocols
+                    .iter()
                     .map(|p| p.dword(direction))
                     .fold(0, |acc, p| acc | p);
             }
             let mut certs = self.certs.iter().map(|c| c.as_inner()).collect::<Vec<_>>();
-            cred_data.cCreds = certs.len() as winapi::DWORD;
-            cred_data.paCred = certs.as_mut_ptr();
+            cred_data.cCreds = certs.len() as u32;
+            cred_data.paCred = certs.as_mut_ptr() as _;
 
             let direction = match direction {
-                Direction::Inbound => sspi::SECPKG_CRED_INBOUND,
-                Direction::Outbound => sspi::SECPKG_CRED_OUTBOUND,
+                Direction::Inbound => Identity::SECPKG_CRED_INBOUND,
+                Direction::Outbound => Identity::SECPKG_CRED_OUTBOUND,
             };
 
-            match sspi::AcquireCredentialsHandleA(ptr::null_mut(),
-                                                  UNISP_NAME.as_ptr() as *const _ as *mut _,
-                                                  direction,
-                                                  ptr::null_mut(),
-                                                  &mut cred_data as *mut _ as *mut _,
-                                                  None,
-                                                  ptr::null_mut(),
-                                                  &mut handle,
-                                                  ptr::null_mut()) {
-                winerror::SEC_E_OK => Ok(SchannelCred::from_inner(handle)),
-                err => Err(io::Error::from_raw_os_error(err as i32)),
+            match Identity::AcquireCredentialsHandleA(
+                ptr::null(),
+                UNISP_NAME.as_ptr(),
+                direction,
+                ptr::null_mut(),
+                &mut cred_data as *const _ as *const _,
+                None,
+                ptr::null_mut(),
+                &mut handle,
+                ptr::null_mut(),
+            ) {
+                Foundation::SEC_E_OK => Ok(SchannelCred::from_inner(handle)),
+                err => Err(io::Error::from_raw_os_error(err)),
             }
         }
     }
@@ -233,12 +270,12 @@ impl Builder {
 #[derive(Clone)]
 pub struct SchannelCred(Arc<RawCredHandle>);
 
-struct RawCredHandle(sspi::CredHandle);
+struct RawCredHandle(Credentials::SecHandle);
 
 impl Drop for RawCredHandle {
     fn drop(&mut self) {
         unsafe {
-            sspi::FreeCredentialsHandle(&mut self.0);
+            Identity::FreeCredentialsHandle(&self.0);
         }
     }
 }
@@ -249,11 +286,11 @@ impl SchannelCred {
         Builder::new()
     }
 
-    unsafe fn from_inner(inner: sspi::CredHandle) -> SchannelCred {
+    unsafe fn from_inner(inner: Credentials::SecHandle) -> SchannelCred {
         SchannelCred(Arc::new(RawCredHandle(inner)))
     }
 
-    pub(crate) fn as_inner(&self) -> sspi::CredHandle {
+    pub(crate) fn as_inner(&self) -> Credentials::SecHandle {
         self.0.as_ref().0
     }
 }
