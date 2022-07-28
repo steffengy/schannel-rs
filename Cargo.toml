@@ -14,7 +14,6 @@ edition = "2018"
 default-target = "x86_64-pc-windows-msvc"
 
 [dependencies]
-lazy_static = "1.0"
 windows-sys = { version = "0.36", features = [
     "Win32_Foundation", "Win32_Security_Cryptography",
     "Win32_Security_Authentication_Identity", "Win32_Security_Credentials",

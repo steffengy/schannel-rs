@@ -22,20 +22,9 @@ use crate::schannel_cred::SchannelCred;
 use crate::security_context::SecurityContext;
 use crate::{secbuf, secbuf_desc, Inner, ACCEPT_REQUESTS, INIT_REQUESTS};
 
-lazy_static! {
-    static ref szOID_PKIX_KP_SERVER_AUTH: Vec<u8> = Cryptography::szOID_PKIX_KP_SERVER_AUTH
-        .bytes()
-        .chain(Some(0))
-        .collect();
-    static ref szOID_SERVER_GATED_CRYPTO: Vec<u8> = Cryptography::szOID_SERVER_GATED_CRYPTO
-        .bytes()
-        .chain(Some(0))
-        .collect();
-    static ref szOID_SGC_NETSCAPE: Vec<u8> = Cryptography::szOID_SGC_NETSCAPE
-        .bytes()
-        .chain(Some(0))
-        .collect();
-}
+static szOID_PKIX_KP_SERVER_AUTH: &[u8] = null_terminate!(Cryptography::szOID_PKIX_KP_SERVER_AUTH);
+static szOID_SERVER_GATED_CRYPTO: &[u8] = null_terminate!(Cryptography::szOID_SERVER_GATED_CRYPTO);
+static szOID_SGC_NETSCAPE: &[u8] = null_terminate!(Cryptography::szOID_SGC_NETSCAPE);
 
 /// A builder type for `TlsStream`s.
 pub struct Builder {
