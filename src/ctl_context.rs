@@ -11,12 +11,7 @@ use windows_sys::Win32::Security::Cryptography;
 use crate::cert_context::CertContext;
 use crate::Inner;
 
-lazy_static! {
-    static ref szOID_OIWSEC_sha1: Vec<u8> = Cryptography::szOID_OIWSEC_sha1
-        .bytes()
-        .chain(Some(0))
-        .collect();
-}
+static szOID_OIWSEC_sha1: &[u8] = null_terminate!(Cryptography::szOID_OIWSEC_sha1);
 
 /// Wrapped `PCCTL_CONTEXT` which represents a certificate trust list to
 /// Windows.

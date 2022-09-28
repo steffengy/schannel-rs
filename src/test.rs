@@ -405,12 +405,7 @@ fn session_resumption_thread_safety() {
 
 const FRIENDLY_NAME: &str = "schannel-rs localhost testing cert";
 
-lazy_static! {
-    static ref szOID_RSA_SHA256RSA: Vec<u8> = Cryptography::szOID_RSA_SHA256RSA
-        .bytes()
-        .chain(Some(0))
-        .collect();
-}
+static szOID_RSA_SHA256RSA: &[u8] = null_terminate!(Cryptography::szOID_RSA_SHA256RSA);
 
 fn install_certificate() -> io::Result<CertContext> {
     unsafe {

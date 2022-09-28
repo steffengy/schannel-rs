@@ -10,9 +10,7 @@ use windows_sys::Win32::Security::{Credentials, Cryptography};
 use crate::cert_context::CertContext;
 use crate::Inner;
 
-lazy_static! {
-    static ref UNISP_NAME: Vec<u8> = Identity::UNISP_NAME.bytes().chain(Some(0)).collect();
-}
+static UNISP_NAME: &[u8] = null_terminate!(Identity::UNISP_NAME);
 
 /// The communication direction that an `SchannelCred` will support.
 #[derive(Copy, Debug, Clone, PartialEq, Eq)]

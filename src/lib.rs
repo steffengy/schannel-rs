@@ -3,9 +3,6 @@
 #![warn(missing_docs)]
 #![allow(non_upper_case_globals)]
 
-#[macro_use]
-extern crate lazy_static;
-
 use std::ffi::c_void;
 use std::ptr;
 
@@ -37,6 +34,27 @@ macro_rules! inner {
             }
         }
     };
+}
+
+macro_rules! null_terminate {
+    ($input:expr) => {{
+        const OUTPUT: [u8; $input.as_bytes().len() + 1] = {
+            let mut output = [0u8; $input.as_bytes().len() + 1];
+
+            let input = $input.as_bytes();
+
+            // The output is 1 byte longer, so the last byte stays initialized to 0
+            let mut i = 0usize;
+            while i < input.len() {
+                output[i] = input[i];
+                i += 1;
+            }
+
+            output
+        };
+
+        &OUTPUT
+    }};
 }
 
 /// Allows access to the underlying schannel API representation of a wrapped data type
