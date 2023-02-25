@@ -454,7 +454,7 @@ impl CertContext {
     fn set_string(&self, prop: u32, s: &str) -> io::Result<()> {
         unsafe {
             let data = s.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
-            let data = Cryptography::CRYPTOAPI_BLOB {
+            let data = Cryptography::CRYPT_INTEGER_BLOB {
                 cbData: (data.len() * 2) as u32,
                 pbData: data.as_ptr() as *mut _,
             };

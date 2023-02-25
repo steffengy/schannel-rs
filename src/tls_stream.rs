@@ -22,10 +22,6 @@ use crate::schannel_cred::SchannelCred;
 use crate::security_context::SecurityContext;
 use crate::{secbuf, secbuf_desc, Inner, ACCEPT_REQUESTS, INIT_REQUESTS};
 
-static szOID_PKIX_KP_SERVER_AUTH: &[u8] = null_terminate!(Cryptography::szOID_PKIX_KP_SERVER_AUTH);
-static szOID_SERVER_GATED_CRYPTO: &[u8] = null_terminate!(Cryptography::szOID_SERVER_GATED_CRYPTO);
-static szOID_SGC_NETSCAPE: &[u8] = null_terminate!(Cryptography::szOID_SGC_NETSCAPE);
-
 /// A builder type for `TlsStream`s.
 pub struct Builder {
     domain: Option<Vec<u16>>,
@@ -686,9 +682,9 @@ where
             para.RequestedUsage.dwType = Cryptography::USAGE_MATCH_TYPE_OR;
 
             let mut identifiers = [
-                szOID_PKIX_KP_SERVER_AUTH.as_ptr() as _,
-                szOID_SERVER_GATED_CRYPTO.as_ptr() as _,
-                szOID_SGC_NETSCAPE.as_ptr() as _,
+                Cryptography::szOID_PKIX_KP_SERVER_AUTH as _,
+                Cryptography::szOID_SERVER_GATED_CRYPTO as _,
+                Cryptography::szOID_SGC_NETSCAPE as _,
             ];
             para.RequestedUsage.Usage.cUsageIdentifier = identifiers.len() as u32;
             para.RequestedUsage.Usage.rgpszUsageIdentifier = identifiers.as_mut_ptr();
