@@ -244,7 +244,7 @@ impl Builder {
                 Direction::Outbound => Identity::SECPKG_CRED_OUTBOUND,
             };
 
-            match Identity::AcquireCredentialsHandleA(
+            match Identity::AcquireCredentialsHandleW(
                 ptr::null(),
                 Identity::UNISP_NAME as _,
                 direction,
