@@ -1,14 +1,19 @@
 //! CNG private keys.
 
-use windows_sys::Win32::Security::Cryptography;
+use crate::bindings::cryptography as Cryptography;
 
 /// A CNG handle to a key.
 pub struct NcryptKey(Cryptography::NCRYPT_KEY_HANDLE);
 
 impl Drop for NcryptKey {
     fn drop(&mut self) {
+        #[link(name = "ncrypt")]
+        extern "system" {
+            pub fn NCryptFreeObject(hObject: usize) -> i32;
+        }
+
         unsafe {
-            Cryptography::NCryptFreeObject(self.0);
+            NCryptFreeObject(self.0);
         }
     }
 }

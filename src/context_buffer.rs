@@ -1,7 +1,7 @@
 use std::ops::Deref;
 use std::slice;
 
-use windows_sys::Win32::Security::Authentication::Identity;
+use crate::bindings::identity as Identity;
 
 pub struct ContextBuffer(pub Identity::SecBuffer);
 
@@ -20,7 +20,7 @@ impl Deref for ContextBuffer {
         if self.0.cbBuffer == 0 {
             return &[];
         }
-        
+
         unsafe { slice::from_raw_parts(self.0.pvBuffer as *const _, self.0.cbBuffer as usize) }
     }
 }

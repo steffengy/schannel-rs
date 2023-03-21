@@ -6,17 +6,110 @@ use std::ptr;
 use std::sync::Once;
 use std::thread;
 
-use windows_sys::Win32::Foundation;
-use windows_sys::Win32::Security::Cryptography;
-use windows_sys::Win32::System::{SystemInformation, Time};
-
 use crate::alpn_list::AlpnList;
+use crate::bindings::cryptography as Cryptography;
+use crate::bindings::BOOL;
 use crate::cert_context::{CertContext, HashAlgorithm, KeySpec};
 use crate::cert_store::{CertAdd, CertStore, Memory};
 use crate::crypt_prov::{AcquireOptions, ProviderType};
 use crate::schannel_cred::{Algorithm, Direction, Protocol, SchannelCred};
 use crate::tls_stream::{self, HandshakeError};
 use crate::Inner;
+
+#[allow(non_camel_case_types, non_snake_case)]
+mod time {
+    #[repr(C)]
+    pub struct SYSTEMTIME {
+        pub wYear: u16,
+        pub wMonth: u16,
+        pub wDayOfWeek: u16,
+        pub wDay: u16,
+        pub wHour: u16,
+        pub wMinute: u16,
+        pub wSecond: u16,
+        pub wMilliseconds: u16,
+    }
+    #[repr(C)]
+    pub struct FILETIME {
+        pub dwLowDateTime: u32,
+        pub dwHighDateTime: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn GetSystemTime(lpSystemTime: *mut SYSTEMTIME);
+        pub fn SystemTimeToFileTime(
+            lpSystemTime: *const SYSTEMTIME,
+            lpFileTime: *mut FILETIME,
+        ) -> super::BOOL;
+        pub fn FileTimeToSystemTime(
+            lpFileTime: *const FILETIME,
+            lpSystemTime: *mut SYSTEMTIME,
+        ) -> super::BOOL;
+    }
+}
+
+#[allow(non_camel_case_types, non_snake_case)]
+mod test_bindings {
+    use super::Cryptography::*;
+    use super::BOOL;
+
+    pub const CERT_E_EXPIRED: i32 = -2146762495;
+    pub const CERT_E_CN_NO_MATCH: i32 = -2146762481;
+    pub const SEC_E_ALGORITHM_MISMATCH: i32 = -2146893007;
+    pub const SEC_E_UNSUPPORTED_FUNCTION: i32 = -2146893054;
+    pub const CERT_E_UNTRUSTEDROOT: i32 = -2146762487;
+
+    pub type CERT_STRING_TYPE = u32;
+    pub const CERT_X500_NAME_STR: CERT_STRING_TYPE = 3;
+
+    pub type CERT_CREATE_SELFSIGN_FLAGS = u32;
+
+    #[repr(C)]
+    pub struct CERT_EXTENSION {
+        pub pszObjId: *const u8,
+        pub fCritical: BOOL,
+        pub Value: CRYPT_INTEGER_BLOB,
+    }
+    #[repr(C)]
+    pub struct CERT_EXTENSIONS {
+        pub cExtension: u32,
+        pub rgExtension: *mut CERT_EXTENSION,
+    }
+
+    #[link(name = "crypt32")]
+    extern "system" {
+        pub fn CertCreateSelfSignCertificate(
+            hCryptProvOrNCryptKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE,
+            pSubjectIssuerBlob: *const CRYPT_INTEGER_BLOB,
+            dwFlags: CERT_CREATE_SELFSIGN_FLAGS,
+            pKeyProvInfo: *const CRYPT_KEY_PROV_INFO,
+            pSignatureAlgorithm: *const CRYPT_ALGORITHM_IDENTIFIER,
+            pStartTime: *const super::time::SYSTEMTIME,
+            pEndTime: *const super::time::SYSTEMTIME,
+            pExtensions: *const CERT_EXTENSIONS,
+        ) -> *mut CERT_CONTEXT;
+
+        pub fn CertStrToNameW(
+            dwCertEncodingType: CERT_QUERY_ENCODING_TYPE,
+            pszX500: *const u16,
+            dwStrType: CERT_STRING_TYPE,
+            pvReserved: *const std::ffi::c_void,
+            pbEncoded: *mut u8,
+            pcbEncoded: *mut u32,
+            ppszError: *mut *mut u16,
+        ) -> BOOL;
+    }
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        pub fn CryptGenKey(
+            hProv: usize,
+            Algid: u32,
+            dwFlags: CRYPT_KEY_FLAGS,
+            phKey: *mut usize,
+        ) -> BOOL;
+    }
+}
 
 #[test]
 fn basic() {
@@ -42,7 +135,7 @@ fn invalid_algorithms() {
         .acquire(Direction::Outbound);
     assert_eq!(
         creds.err().unwrap().raw_os_error().unwrap(),
-        Foundation::SEC_E_ALGORITHM_MISMATCH as i32
+        test_bindings::SEC_E_ALGORITHM_MISMATCH
     );
 }
 
@@ -87,7 +180,7 @@ fn invalid_protocol() {
     let err = unwrap_handshake(err);
     assert_eq!(
         err.raw_os_error().unwrap(),
-        Foundation::SEC_E_UNSUPPORTED_FUNCTION as i32
+        test_bindings::SEC_E_UNSUPPORTED_FUNCTION
     );
 }
 
@@ -139,10 +232,7 @@ fn expired_cert() {
         .err()
         .unwrap();
     let err = unwrap_handshake(err);
-    assert_eq!(
-        err.raw_os_error().unwrap(),
-        Foundation::CERT_E_EXPIRED as i32
-    );
+    assert_eq!(err.raw_os_error().unwrap(), test_bindings::CERT_E_EXPIRED);
 }
 
 #[test]
@@ -159,7 +249,7 @@ fn self_signed_cert() {
     let err = unwrap_handshake(err);
     assert_eq!(
         err.raw_os_error().unwrap(),
-        Foundation::CERT_E_UNTRUSTEDROOT as i32
+        test_bindings::CERT_E_UNTRUSTEDROOT
     );
 }
 
@@ -194,7 +284,7 @@ fn wrong_host_cert() {
     let err = unwrap_handshake(err);
     assert_eq!(
         err.raw_os_error().unwrap(),
-        Foundation::CERT_E_CN_NO_MATCH as i32
+        test_bindings::CERT_E_CN_NO_MATCH
     );
 }
 
@@ -244,7 +334,7 @@ fn validation_failure_is_permanent() {
     let err = unwrap_handshake(stream.handshake().err().unwrap());
     assert_eq!(
         err.raw_os_error().unwrap(),
-        Foundation::CERT_E_UNTRUSTEDROOT as i32
+        test_bindings::CERT_E_UNTRUSTEDROOT
     );
 }
 
@@ -282,7 +372,7 @@ fn verify_callback_error() {
         .verify_callback(|validation_result| {
             assert!(validation_result.result().is_ok());
             Err(io::Error::from_raw_os_error(
-                Foundation::CERT_E_UNTRUSTEDROOT,
+                test_bindings::CERT_E_UNTRUSTEDROOT,
             ))
         })
         .connect(creds, stream)
@@ -291,7 +381,7 @@ fn verify_callback_error() {
     let err = unwrap_handshake(err);
     assert_eq!(
         err.raw_os_error().unwrap(),
-        Foundation::CERT_E_UNTRUSTEDROOT as i32
+        test_bindings::CERT_E_UNTRUSTEDROOT
     );
 }
 
@@ -314,7 +404,7 @@ fn verify_callback_gives_failed_cert() {
                 expected_finger
             );
             Err(io::Error::from_raw_os_error(
-                Foundation::CERT_E_UNTRUSTEDROOT,
+                test_bindings::CERT_E_UNTRUSTEDROOT,
             ))
         })
         .connect(creds, stream)
@@ -323,7 +413,7 @@ fn verify_callback_gives_failed_cert() {
     let err = unwrap_handshake(err);
     assert_eq!(
         err.raw_os_error().unwrap(),
-        Foundation::CERT_E_UNTRUSTEDROOT as i32
+        test_bindings::CERT_E_UNTRUSTEDROOT
     );
 }
 
@@ -402,7 +492,7 @@ fn session_resumption_thread_safety() {
 
 const FRIENDLY_NAME: &str = "schannel-rs localhost testing cert";
 
-static szOID_RSA_SHA256RSA: &[u8] = null_terminate!(Cryptography::szOID_RSA_SHA256RSA);
+const szOID_RSA_SHA256RSA: &[u8] = b"1.2.840.113549.1.1.11\0";
 
 fn install_certificate() -> io::Result<CertContext> {
     unsafe {
@@ -435,7 +525,7 @@ fn install_certificate() -> io::Result<CertContext> {
         }
 
         // create a new keypair (RSA-2048)
-        let res = Cryptography::CryptGenKey(
+        let res = test_bindings::CryptGenKey(
             provider,
             Cryptography::AT_SIGNATURE,
             0x0800 << 16 | Cryptography::CRYPT_EXPORTABLE,
@@ -452,10 +542,10 @@ fn install_certificate() -> io::Result<CertContext> {
             .collect::<Vec<_>>();
         let mut cname_buffer: [u16; 257] = mem::zeroed();
         let mut cname_len = cname_buffer.len() as u32;
-        let res = Cryptography::CertStrToNameW(
+        let res = test_bindings::CertStrToNameW(
             Cryptography::X509_ASN_ENCODING,
             name.as_ptr(),
-            Cryptography::CERT_X500_NAME_STR,
+            test_bindings::CERT_X500_NAME_STR,
             ptr::null_mut(),
             cname_buffer.as_mut_ptr() as *mut u8,
             &mut cname_len,
@@ -465,7 +555,7 @@ fn install_certificate() -> io::Result<CertContext> {
             return Err(Error::last_os_error());
         }
 
-        let subject_issuer = Cryptography::CRYPTOAPI_BLOB {
+        let subject_issuer = Cryptography::CRYPT_INTEGER_BLOB {
             cbData: cname_len,
             pbData: cname_buffer.as_ptr() as *mut u8,
         };
@@ -482,10 +572,10 @@ fn install_certificate() -> io::Result<CertContext> {
             pszObjId: szOID_RSA_SHA256RSA.as_ptr() as *mut _,
             Parameters: mem::zeroed(),
         };
-        let mut expiration_date: Foundation::SYSTEMTIME = mem::zeroed();
-        SystemInformation::GetSystemTime(&mut expiration_date);
-        let mut file_time: Foundation::FILETIME = mem::zeroed();
-        let res = Time::SystemTimeToFileTime(&expiration_date, &mut file_time);
+        let mut expiration_date: time::SYSTEMTIME = mem::zeroed();
+        time::GetSystemTime(&mut expiration_date);
+        let mut file_time: time::FILETIME = mem::zeroed();
+        let res = time::SystemTimeToFileTime(&expiration_date, &mut file_time);
         if res == 0 {
             return Err(Error::last_os_error());
         }
@@ -495,16 +585,16 @@ fn install_certificate() -> io::Result<CertContext> {
         timestamp += (1E9 as u64) / 100 * (60 * 60 * 24);
         file_time.dwLowDateTime = timestamp as u32;
         file_time.dwHighDateTime = (timestamp >> 32) as u32;
-        let res = Time::FileTimeToSystemTime(&file_time, &mut expiration_date);
+        let res = time::FileTimeToSystemTime(&file_time, &mut expiration_date);
         if res == 0 {
             return Err(Error::last_os_error());
         }
 
         // create a self signed certificate
-        let cert_context = Cryptography::CertCreateSelfSignCertificate(
+        let cert_context = test_bindings::CertCreateSelfSignCertificate(
             Cryptography::HCRYPTPROV_OR_NCRYPT_KEY_HANDLE::default(),
             &subject_issuer,
-            Cryptography::CERT_CREATE_SELFSIGN_FLAGS::default(),
+            test_bindings::CERT_CREATE_SELFSIGN_FLAGS::default(),
             &key_provider,
             &sig_algorithm,
             ptr::null_mut(),

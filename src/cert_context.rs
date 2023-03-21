@@ -7,9 +7,7 @@ use std::os::windows::prelude::*;
 use std::ptr;
 use std::slice;
 
-use windows_sys::Win32::Foundation;
-use windows_sys::Win32::Security::Cryptography;
-
+use crate::bindings::{self as Foundation, cryptography as Cryptography};
 use crate::cert_store::CertStore;
 use crate::crypt_prov::{CryptProv, ProviderType};
 use crate::ncrypt_key::NcryptKey;
@@ -387,7 +385,7 @@ impl CertContext {
 
     fn get_encoded_bytes(&self) -> &[u8] {
         unsafe {
-            let cert_ctx = *self.0;
+            let cert_ctx = &*self.0;
             slice::from_raw_parts(cert_ctx.pbCertEncoded, cert_ctx.cbCertEncoded as usize)
         }
     }
@@ -454,7 +452,7 @@ impl CertContext {
     fn set_string(&self, prop: u32, s: &str) -> io::Result<()> {
         unsafe {
             let data = s.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
-            let data = Cryptography::CRYPTOAPI_BLOB {
+            let data = Cryptography::CRYPT_INTEGER_BLOB {
                 cbData: (data.len() * 2) as u32,
                 pbData: data.as_ptr() as *mut _,
             };

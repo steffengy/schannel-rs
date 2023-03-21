@@ -3,8 +3,7 @@
 use std::mem;
 use std::slice;
 
-use windows_sys::Win32::Security::Cryptography;
-
+use crate::bindings::cryptography as Cryptography;
 use crate::cert_context::CertContext;
 use crate::Inner;
 
@@ -45,7 +44,7 @@ impl CertChainContext {
     /// Retrieves the specified chain from the context.
     pub fn get_chain(&self, index: usize) -> Option<CertChain> {
         let cert_chain = unsafe {
-            let cert_chain = *self.0;
+            let cert_chain = &*self.0;
             if index >= cert_chain.cChain as usize {
                 None
             } else {
@@ -83,7 +82,7 @@ impl CertChain {
     /// Get the n-th certificate from the current chain
     pub fn get(&self, idx: usize) -> Option<CertContext> {
         let elements = unsafe {
-            let cert_chain = *self.0;
+            let cert_chain = &*self.0;
             slice::from_raw_parts(
                 cert_chain.rgpElement as *mut &mut Cryptography::CERT_CHAIN_ELEMENT,
                 cert_chain.cElement as usize,

@@ -6,12 +6,11 @@ use std::io;
 use std::mem;
 use std::ptr;
 
-use windows_sys::Win32::Security::Cryptography;
-
+use crate::bindings::cryptography as Cryptography;
 use crate::cert_context::CertContext;
 use crate::Inner;
 
-static szOID_OIWSEC_sha1: &[u8] = null_terminate!(Cryptography::szOID_OIWSEC_sha1);
+const szOID_OIWSEC_sha1: &[u8] = b"1.3.14.3.2.26\0";
 
 /// Wrapped `PCCTL_CONTEXT` which represents a certificate trust list to
 /// Windows.
@@ -109,7 +108,7 @@ impl Builder {
             let mut encoded_certs = self
                 .certificates
                 .iter()
-                .map(|c| Cryptography::CRYPTOAPI_BLOB {
+                .map(|c| Cryptography::CRYPT_INTEGER_BLOB {
                     cbData: (*c.as_inner()).cbCertEncoded,
                     pbData: (*c.as_inner()).pbCertEncoded,
                 })

@@ -2,11 +2,10 @@ use std::io;
 use std::mem;
 use std::ptr;
 
-use windows_sys::Win32::Foundation;
-use windows_sys::Win32::Security::Authentication::Identity;
-use windows_sys::Win32::Security::Credentials;
-
 use crate::alpn_list::AlpnList;
+use crate::bindings as Foundation;
+use crate::bindings::credentials as Credentials;
+use crate::bindings::identity as Identity;
 use crate::cert_context::CertContext;
 use crate::context_buffer::ContextBuffer;
 use crate::schannel_cred::SchannelCred;

@@ -6,13 +6,11 @@
 use std::ffi::c_void;
 use std::ptr;
 
-use windows_sys::Win32::Security::Authentication::Identity;
-
 macro_rules! inner {
     ($t:path, $raw:ty) => {
         impl crate::Inner<$raw> for $t {
             unsafe fn from_inner(t: $raw) -> Self {
-                $t(t)
+                Self(t)
             }
 
             fn as_inner(&self) -> $raw {
@@ -25,8 +23,8 @@ macro_rules! inner {
         }
 
         impl crate::RawPointer for $t {
-            unsafe fn from_ptr(t: *mut ::std::os::raw::c_void) -> $t {
-                $t(t as _)
+            unsafe fn from_ptr(t: *mut ::std::os::raw::c_void) -> Self {
+                Self(t as _)
             }
 
             unsafe fn as_ptr(&self) -> *mut ::std::os::raw::c_void {
@@ -34,27 +32,6 @@ macro_rules! inner {
             }
         }
     };
-}
-
-macro_rules! null_terminate {
-    ($input:expr) => {{
-        const OUTPUT: [u8; $input.as_bytes().len() + 1] = {
-            let mut output = [0u8; $input.as_bytes().len() + 1];
-
-            let input = $input.as_bytes();
-
-            // The output is 1 byte longer, so the last byte stays initialized to 0
-            let mut i = 0usize;
-            while i < input.len() {
-                output[i] = input[i];
-                i += 1;
-            }
-
-            output
-        };
-
-        &OUTPUT
-    }};
 }
 
 /// Allows access to the underlying schannel API representation of a wrapped data type
@@ -85,11 +62,14 @@ pub mod schannel_cred;
 pub mod tls_stream;
 
 mod alpn_list;
+pub(crate) mod bindings;
 mod context_buffer;
 mod security_context;
 
 #[cfg(test)]
 mod test;
+
+use bindings::identity as Identity;
 
 const ACCEPT_REQUESTS: u32 = Identity::ASC_REQ_ALLOCATE_MEMORY
     | Identity::ASC_REQ_CONFIDENTIALITY

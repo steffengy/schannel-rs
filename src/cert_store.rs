@@ -8,8 +8,7 @@ use std::mem;
 use std::os::windows::prelude::*;
 use std::ptr;
 
-use windows_sys::Win32::Security::Cryptography;
-
+use crate::bindings::cryptography as Cryptography;
 use crate::cert_context::CertContext;
 use crate::ctl_context::CtlContext;
 use crate::Inner;
@@ -156,7 +155,7 @@ impl CertStore {
     /// The password must also be provided to decrypt the encoded data.
     pub fn import_pkcs12(data: &[u8], password: Option<&str>) -> io::Result<CertStore> {
         unsafe {
-            let blob = Cryptography::CRYPTOAPI_BLOB {
+            let blob = Cryptography::CRYPT_INTEGER_BLOB {
                 cbData: data.len() as u32,
                 pbData: data.as_ptr() as *mut u8,
             };
@@ -326,7 +325,7 @@ impl PfxImportOptions {
     /// Imports certificates from a PKCS #12 archive, returning a `CertStore` containing them.
     pub fn import(&self, data: &[u8]) -> io::Result<CertStore> {
         unsafe {
-            let blob = Cryptography::CRYPTOAPI_BLOB {
+            let blob = Cryptography::CRYPT_INTEGER_BLOB {
                 cbData: cmp::min(data.len(), u32::max_value() as usize) as u32,
                 pbData: data.as_ptr() as *mut _,
             };

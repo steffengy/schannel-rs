@@ -9,11 +9,10 @@ use std::ptr;
 use std::slice;
 use std::sync::Arc;
 
-use windows_sys::Win32::Foundation;
-use windows_sys::Win32::Security::Authentication::Identity;
-use windows_sys::Win32::Security::Cryptography;
-
 use crate::alpn_list::AlpnList;
+use crate::bindings as Foundation;
+use crate::bindings::cryptography as Cryptography;
+use crate::bindings::identity as Identity;
 use crate::cert_chain::{CertChain, CertChainContext};
 use crate::cert_context::CertContext;
 use crate::cert_store::{CertAdd, CertStore};
@@ -22,9 +21,9 @@ use crate::schannel_cred::SchannelCred;
 use crate::security_context::SecurityContext;
 use crate::{secbuf, secbuf_desc, Inner, ACCEPT_REQUESTS, INIT_REQUESTS};
 
-static szOID_PKIX_KP_SERVER_AUTH: &[u8] = null_terminate!(Cryptography::szOID_PKIX_KP_SERVER_AUTH);
-static szOID_SERVER_GATED_CRYPTO: &[u8] = null_terminate!(Cryptography::szOID_SERVER_GATED_CRYPTO);
-static szOID_SGC_NETSCAPE: &[u8] = null_terminate!(Cryptography::szOID_SGC_NETSCAPE);
+const szOID_PKIX_KP_SERVER_AUTH: &[u8] = b"1.3.6.1.5.5.7.3.1\0";
+const szOID_SERVER_GATED_CRYPTO: &[u8] = b"1.3.6.1.4.1.311.10.3.3\0";
+const szOID_SGC_NETSCAPE: &[u8] = b"2.16.840.1.113730.4.1\0";
 
 /// A builder type for `TlsStream`s.
 pub struct Builder {

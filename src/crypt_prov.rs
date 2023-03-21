@@ -4,9 +4,7 @@ use std::io;
 use std::ptr;
 use std::slice;
 
-use windows_sys::Win32::Security::Cryptography;
-use windows_sys::Win32::System::Memory;
-
+use crate::bindings::cryptography as Cryptography;
 use crate::crypt_key::CryptKey;
 use crate::Inner;
 
@@ -175,6 +173,11 @@ impl ProviderType {
     }
 }
 
+#[link(name = "kernel32")]
+extern "system" {
+    fn LocalFree(hMem: isize) -> isize;
+}
+
 /// A builder for key imports.
 pub struct ImportOptions<'a> {
     prov: &'a mut CryptProv,
@@ -204,7 +207,7 @@ impl<'a> ImportOptions<'a> {
 
             let mut key = 0;
             let res = Cryptography::CryptImportKey(self.prov.0, buf, len, 0, self.flags, &mut key);
-            Memory::LocalFree(buf as isize);
+            LocalFree(buf as isize);
 
             if res != 0 {
                 Ok(CryptKey::from_inner(key))
@@ -220,7 +223,7 @@ impl<'a> ImportOptions<'a> {
             assert!(der.len() <= u32::max_value() as usize);
 
             // Decode the der format into a CRYPT_PRIVATE_KEY_INFO struct
-            let mut buf = ptr::null_mut();
+            let mut buf = ptr::null_mut::<Cryptography::CRYPT_PRIVATE_KEY_INFO>();
             let mut len = 0;
             let res = Cryptography::CryptDecodeObjectEx(
                 Cryptography::X509_ASN_ENCODING | Cryptography::PKCS_7_ASN_ENCODING,
@@ -235,11 +238,11 @@ impl<'a> ImportOptions<'a> {
             if res == 0 {
                 return Err(io::Error::last_os_error());
             }
-            let pkey: Cryptography::CRYPT_PRIVATE_KEY_INFO = *buf;
+            let pkey = &*buf;
             let pkey = pkey.PrivateKey;
 
             let res = self.import(slice::from_raw_parts(pkey.pbData, pkey.cbData as usize));
-            Memory::LocalFree(buf as isize);
+            LocalFree(buf as isize);
             res
         }
     }
@@ -303,9 +306,8 @@ impl<'a> ImportOptions<'a> {
 
 #[cfg(test)]
 mod test {
-    use windows_sys::Win32::Security::Cryptography::CRYPT_STRING_BASE64HEADER;
-
     use super::*;
+    use Cryptography::CRYPT_STRING_BASE64HEADER;
 
     #[test]
     fn rsa_key() {

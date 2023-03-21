@@ -3,14 +3,15 @@ use std::ptr;
 use std::sync::Arc;
 use std::{io, mem};
 
-use windows_sys::Win32::Foundation;
-use windows_sys::Win32::Security::Authentication::Identity;
-use windows_sys::Win32::Security::{Credentials, Cryptography};
+use crate::bindings as Foundation;
+use crate::bindings::credentials as Credentials;
+use crate::bindings::cryptography as Cryptography;
+use crate::bindings::identity as Identity;
 
 use crate::cert_context::CertContext;
 use crate::Inner;
 
-static UNISP_NAME: &[u8] = null_terminate!(Identity::UNISP_NAME);
+const UNISP_NAME: &[u8] = b"Microsoft Unified Security Protocol Provider\0";
 
 /// The communication direction that an `SchannelCred` will support.
 #[derive(Copy, Debug, Clone, PartialEq, Eq)]

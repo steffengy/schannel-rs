@@ -3,7 +3,7 @@ use std::mem;
 use std::ptr;
 use std::slice;
 
-use windows_sys::Win32::Security::Authentication::Identity;
+use crate::bindings::identity as Identity;
 
 // This is manually calculated here rather than using `size_of::<SEC_APPLICATION_PROTOCOL_LIST>()`,
 // as the latter is 2 bytes too large because it accounts for padding at the end of the struct for
