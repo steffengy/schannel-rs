@@ -12,12 +12,3 @@ edition = "2018"
 
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"
-
-[dependencies]
-windows-sys = { version = "0.42", features = [
-    "Win32_Foundation", "Win32_Security_Cryptography",
-    "Win32_Security_Authentication_Identity", "Win32_Security_Credentials",
-    "Win32_System_Memory"] }
-
-[dev-dependencies]
-windows-sys = { version = "0.42", features = ["Win32_System_SystemInformation", "Win32_System_Time"] }
