@@ -17,15 +17,22 @@ jobs:
     runs-on: windows-2022
     strategy:
       matrix:
-        channel: [1.46.0, nightly]
-        arch: [x86_64, i686]
-        env: [msvc, gnu]
+        target:
+          [x86_64-pc-windows-msvc, i686-pc-windows-msvc, x86_64-pc-windows-gnu]
+        channel: [nightly]
+        include:
+          - target: i686-pc-windows-gnu
+            channel: 1.46.0
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@master
-        name: toolchain
         with:
           toolchain: ${{ matrix.channel }}
-          target: ${{ matrix.arch }}-pc-windows-${{ matrix.env }}
-      - run: cargo build +${{steps.toolchain.outputs.name}} --tests --target ${{ matrix.arch }}-pc-windows-${{ matrix.env }}
-      - run: cargo test +${{steps.toolchain.outputs.name}} --target ${{ matrix.arch }}-pc-windows-${{ matrix.env }}
+          target: ${{ matrix.target }}
+      - if: matrix.target == 'i686-pc-windows-gnu'
+        uses: MinoruSekine/setup-scoop@main
+      - if: matrix.target == 'i686-pc-windows-gnu'
+        run: |
+          scoop install -a 32bit mingw-winlibs
+      - run: cargo +${{ matrix.channel }} build --tests --target ${{ matrix.target }}
+      - run: cargo +${{ matrix.channel }} test --target ${{ matrix.target }}
