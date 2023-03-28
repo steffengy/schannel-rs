@@ -1,0 +1,31 @@
+name: Rust
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "*"
+  pull_request:
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_TEST_THREADS: 1
+
+jobs:
+  test:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        channel: [1.46.0, nightly]
+        arch: [x86_64, i686]
+        env: [msvc, gnu]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@master
+        name: toolchain
+        with:
+          toolchain: ${{ matrix.channel }}
+          target: ${{ matrix.arch }}-pc-windows-${{ $matrix.env }}
+      - run: cargo build +${{steps.toolchain.outputs.name}} --tests --target ${{ matrix.arch }}-pc-windows-${{ $matrix.env }}
+      - run: cargo test +${{steps.toolchain.outputs.name}} --target ${{ matrix.arch }}-pc-windows-${{ $matrix.env }}
