@@ -7,7 +7,7 @@ pub struct NcryptKey(Cryptography::NCRYPT_KEY_HANDLE);
 
 impl Drop for NcryptKey {
     fn drop(&mut self) {
-        //#[link(name = "ncrypt")]
+        #[link(name = "windows")] // ncrypt
         extern "system" {
             pub fn NCryptFreeObject(hObject: usize) -> i32;
         }

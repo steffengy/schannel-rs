@@ -34,7 +34,7 @@ mod time {
         pub dwLowDateTime: u32,
         pub dwHighDateTime: u32,
     }
-    //#[link(name = "kernel32")]
+    #[link(name = "windows")] // kernel32
     extern "system" {
         pub fn GetSystemTime(lpSystemTime: *mut SYSTEMTIME);
         pub fn SystemTimeToFileTime(
@@ -76,7 +76,7 @@ mod test_bindings {
         pub rgExtension: *mut CERT_EXTENSION,
     }
 
-    //#[link(name = "crypt32")]
+    #[link(name = "windows")] // crypt32
     extern "system" {
         pub fn CertCreateSelfSignCertificate(
             hCryptProvOrNCryptKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE,
@@ -100,7 +100,7 @@ mod test_bindings {
         ) -> BOOL;
     }
 
-    //#[link(name = "advapi32")]
+    #[link(name = "windows")] // advapi32
     extern "system" {
         pub fn CryptGenKey(
             hProv: usize,
@@ -630,7 +630,7 @@ test suite with SCHANNEL_RS_SKIP_SERVER_TESTS=1.
 }
 
 fn local_root_store() -> CertStore {
-    if env::var("APPVEYOR").is_ok() {
+    if env::var("APPVEYOR").is_ok() || env::var("CI").is_ok() {
         CertStore::open_local_machine("Root").unwrap()
     } else {
         CertStore::open_current_user("Root").unwrap()
