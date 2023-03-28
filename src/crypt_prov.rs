@@ -173,7 +173,7 @@ impl ProviderType {
     }
 }
 
-#[link(name = "kernel32")]
+//#[link(name = "kernel32")]
 extern "system" {
     fn LocalFree(hMem: isize) -> isize;
 }

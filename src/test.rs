@@ -34,7 +34,7 @@ mod time {
         pub dwLowDateTime: u32,
         pub dwHighDateTime: u32,
     }
-    #[link(name = "kernel32")]
+    //#[link(name = "kernel32")]
     extern "system" {
         pub fn GetSystemTime(lpSystemTime: *mut SYSTEMTIME);
         pub fn SystemTimeToFileTime(
@@ -76,7 +76,7 @@ mod test_bindings {
         pub rgExtension: *mut CERT_EXTENSION,
     }
 
-    #[link(name = "crypt32")]
+    //#[link(name = "crypt32")]
     extern "system" {
         pub fn CertCreateSelfSignCertificate(
             hCryptProvOrNCryptKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE,
@@ -100,7 +100,7 @@ mod test_bindings {
         ) -> BOOL;
     }
 
-    #[link(name = "advapi32")]
+    //#[link(name = "advapi32")]
     extern "system" {
         pub fn CryptGenKey(
             hProv: usize,
