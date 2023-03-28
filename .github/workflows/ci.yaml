@@ -26,6 +26,6 @@ jobs:
         name: toolchain
         with:
           toolchain: ${{ matrix.channel }}
-          target: ${{ matrix.arch }}-pc-windows-${{ $matrix.env }}
-      - run: cargo build +${{steps.toolchain.outputs.name}} --tests --target ${{ matrix.arch }}-pc-windows-${{ $matrix.env }}
-      - run: cargo test +${{steps.toolchain.outputs.name}} --target ${{ matrix.arch }}-pc-windows-${{ $matrix.env }}
+          target: ${{ matrix.arch }}-pc-windows-${{ matrix.env }}
+      - run: cargo build +${{steps.toolchain.outputs.name}} --tests --target ${{ matrix.arch }}-pc-windows-${{ matrix.env }}
+      - run: cargo test +${{steps.toolchain.outputs.name}} --target ${{ matrix.arch }}-pc-windows-${{ matrix.env }}
