@@ -17,4 +17,8 @@ edition = "2018"
 default-target = "x86_64-pc-windows-msvc"
 
 [dependencies]
-windows-targets = "0.42"
+windows-targets = "0.47"
+
+# Uncomment this to regenerate bindings
+# [dev-dependencies]
+# windows-bindgen = "0.47"

@@ -4,9 +4,8 @@ use std::sync::Arc;
 use std::{io, mem};
 
 use crate::bindings as Foundation;
-use crate::bindings::credentials as Credentials;
 use crate::bindings::cryptography as Cryptography;
-use crate::bindings::identity as Identity;
+use crate::bindings::identity::{self as Identity, SecHandle};
 
 use crate::cert_context::CertContext;
 use crate::Inner;
@@ -223,7 +222,7 @@ impl Builder {
     /// Creates a new `SchannelCred`.
     pub fn acquire(&self, direction: Direction) -> io::Result<SchannelCred> {
         unsafe {
-            let mut handle: Credentials::SecHandle = mem::zeroed();
+            let mut handle: SecHandle = mem::zeroed();
             let mut cred_data: Identity::SCHANNEL_CRED = mem::zeroed();
             cred_data.dwVersion = Identity::SCHANNEL_CRED_VERSION;
             cred_data.dwFlags =
@@ -269,7 +268,7 @@ impl Builder {
 #[derive(Clone)]
 pub struct SchannelCred(Arc<RawCredHandle>);
 
-struct RawCredHandle(Credentials::SecHandle);
+struct RawCredHandle(SecHandle);
 
 impl Drop for RawCredHandle {
     fn drop(&mut self) {
@@ -285,11 +284,11 @@ impl SchannelCred {
         Builder::new()
     }
 
-    unsafe fn from_inner(inner: Credentials::SecHandle) -> SchannelCred {
+    unsafe fn from_inner(inner: SecHandle) -> SchannelCred {
         SchannelCred(Arc::new(RawCredHandle(inner)))
     }
 
-    pub(crate) fn as_inner(&self) -> Credentials::SecHandle {
+    pub(crate) fn as_inner(&self) -> SecHandle {
         self.0.as_ref().0
     }
 }

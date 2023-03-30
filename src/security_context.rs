@@ -4,14 +4,13 @@ use std::ptr;
 
 use crate::alpn_list::AlpnList;
 use crate::bindings as Foundation;
-use crate::bindings::credentials as Credentials;
 use crate::bindings::identity as Identity;
 use crate::cert_context::CertContext;
 use crate::context_buffer::ContextBuffer;
 use crate::schannel_cred::SchannelCred;
 use crate::{secbuf, secbuf_desc, Inner, INIT_REQUESTS};
 
-pub struct SecurityContext(Credentials::SecHandle);
+pub struct SecurityContext(Identity::SecHandle);
 
 impl Drop for SecurityContext {
     fn drop(&mut self) {
@@ -21,16 +20,16 @@ impl Drop for SecurityContext {
     }
 }
 
-impl Inner<Credentials::SecHandle> for SecurityContext {
-    unsafe fn from_inner(inner: Credentials::SecHandle) -> SecurityContext {
+impl Inner<Identity::SecHandle> for SecurityContext {
+    unsafe fn from_inner(inner: Identity::SecHandle) -> SecurityContext {
         SecurityContext(inner)
     }
 
-    fn as_inner(&self) -> Credentials::SecHandle {
+    fn as_inner(&self) -> Identity::SecHandle {
         self.0
     }
 
-    fn get_mut(&mut self) -> &mut Credentials::SecHandle {
+    fn get_mut(&mut self) -> &mut Identity::SecHandle {
         &mut self.0
     }
 }
