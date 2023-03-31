@@ -7,9 +7,334 @@
     dead_code,
     clippy::all
 )]
-
-use super::*;
-
+pub type HRESULT = i32;
+pub type HSTRING = *mut ::core::ffi::c_void;
+pub type IUnknown = *mut ::core::ffi::c_void;
+pub type IInspectable = *mut ::core::ffi::c_void;
+pub type PSTR = *mut u8;
+pub type PWSTR = *mut u16;
+pub type PCSTR = *const u8;
+pub type PCWSTR = *const u16;
+pub type BSTR = *const u16;
+#[repr(C)]
+pub struct GUID {
+    pub data1: u32,
+    pub data2: u16,
+    pub data3: u16,
+    pub data4: [u8; 8],
+}
+impl GUID {
+    pub const fn from_u128(uuid: u128) -> Self {
+        Self {
+            data1: (uuid >> 96) as u32,
+            data2: (uuid >> 80 & 0xffff) as u16,
+            data3: (uuid >> 64 & 0xffff) as u16,
+            data4: (uuid as u64).to_be_bytes(),
+        }
+    }
+}
+impl ::core::marker::Copy for GUID {}
+impl ::core::clone::Clone for GUID {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[repr(C)]
+pub struct SecHandle {
+    pub dwLower: usize,
+    pub dwUpper: usize,
+}
+impl ::core::marker::Copy for SecHandle {}
+impl ::core::clone::Clone for SecHandle {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+pub const SECBUFFER_ALERT: u32 = 17u32;
+pub const SECBUFFER_APPLICATION_PROTOCOLS: u32 = 18u32;
+pub const SECBUFFER_DATA: u32 = 1u32;
+pub const SECBUFFER_EMPTY: u32 = 0u32;
+pub const SECBUFFER_EXTRA: u32 = 5u32;
+pub const SECBUFFER_MISSING: u32 = 4u32;
+pub const SECBUFFER_STREAM_HEADER: u32 = 7u32;
+pub const SECBUFFER_STREAM_TRAILER: u32 = 6u32;
+pub const SECBUFFER_TOKEN: u32 = 2u32;
+pub const SECBUFFER_VERSION: u32 = 0u32;
+pub const SP_PROT_SSL3_CLIENT: u32 = 32u32;
+pub const SP_PROT_SSL3_SERVER: u32 = 16u32;
+pub const SP_PROT_TLS1_0_CLIENT: u32 = 128u32;
+pub const SP_PROT_TLS1_0_SERVER: u32 = 64u32;
+pub const SP_PROT_TLS1_1_CLIENT: u32 = 512u32;
+pub const SP_PROT_TLS1_1_SERVER: u32 = 256u32;
+pub const SP_PROT_TLS1_2_CLIENT: u32 = 2048u32;
+pub const SP_PROT_TLS1_2_SERVER: u32 = 1024u32;
+pub const SP_PROT_TLS1_3_CLIENT: u32 = 8192u32;
+pub const SP_PROT_TLS1_3_SERVER: u32 = 4096u32;
+pub type ASC_REQ_FLAGS = u32;
+pub const ASC_REQ_DELEGATE: ASC_REQ_FLAGS = 1u32;
+pub const ASC_REQ_MUTUAL_AUTH: ASC_REQ_FLAGS = 2u32;
+pub const ASC_REQ_REPLAY_DETECT: ASC_REQ_FLAGS = 4u32;
+pub const ASC_REQ_SEQUENCE_DETECT: ASC_REQ_FLAGS = 8u32;
+pub const ASC_REQ_CONFIDENTIALITY: ASC_REQ_FLAGS = 16u32;
+pub const ASC_REQ_USE_SESSION_KEY: ASC_REQ_FLAGS = 32u32;
+pub const ASC_REQ_SESSION_TICKET: ASC_REQ_FLAGS = 64u32;
+pub const ASC_REQ_ALLOCATE_MEMORY: ASC_REQ_FLAGS = 256u32;
+pub const ASC_REQ_USE_DCE_STYLE: ASC_REQ_FLAGS = 512u32;
+pub const ASC_REQ_DATAGRAM: ASC_REQ_FLAGS = 1024u32;
+pub const ASC_REQ_CONNECTION: ASC_REQ_FLAGS = 2048u32;
+pub const ASC_REQ_CALL_LEVEL: ASC_REQ_FLAGS = 4096u32;
+pub const ASC_REQ_FRAGMENT_SUPPLIED: ASC_REQ_FLAGS = 8192u32;
+pub const ASC_REQ_EXTENDED_ERROR: ASC_REQ_FLAGS = 32768u32;
+pub const ASC_REQ_STREAM: ASC_REQ_FLAGS = 65536u32;
+pub const ASC_REQ_INTEGRITY: ASC_REQ_FLAGS = 131072u32;
+pub const ASC_REQ_LICENSING: ASC_REQ_FLAGS = 262144u32;
+pub const ASC_REQ_IDENTIFY: ASC_REQ_FLAGS = 524288u32;
+pub const ASC_REQ_ALLOW_NULL_SESSION: ASC_REQ_FLAGS = 1048576u32;
+pub const ASC_REQ_ALLOW_NON_USER_LOGONS: ASC_REQ_FLAGS = 2097152u32;
+pub const ASC_REQ_ALLOW_CONTEXT_REPLAY: ASC_REQ_FLAGS = 4194304u32;
+pub const ASC_REQ_FRAGMENT_TO_FIT: ASC_REQ_FLAGS = 8388608u32;
+pub const ASC_REQ_NO_TOKEN: ASC_REQ_FLAGS = 16777216u32;
+pub const ASC_REQ_PROXY_BINDINGS: ASC_REQ_FLAGS = 67108864u32;
+pub const ASC_REQ_ALLOW_MISSING_BINDINGS: ASC_REQ_FLAGS = 268435456u32;
+pub type ISC_REQ_FLAGS = u32;
+pub const ISC_REQ_DELEGATE: ISC_REQ_FLAGS = 1u32;
+pub const ISC_REQ_MUTUAL_AUTH: ISC_REQ_FLAGS = 2u32;
+pub const ISC_REQ_REPLAY_DETECT: ISC_REQ_FLAGS = 4u32;
+pub const ISC_REQ_SEQUENCE_DETECT: ISC_REQ_FLAGS = 8u32;
+pub const ISC_REQ_CONFIDENTIALITY: ISC_REQ_FLAGS = 16u32;
+pub const ISC_REQ_USE_SESSION_KEY: ISC_REQ_FLAGS = 32u32;
+pub const ISC_REQ_PROMPT_FOR_CREDS: ISC_REQ_FLAGS = 64u32;
+pub const ISC_REQ_USE_SUPPLIED_CREDS: ISC_REQ_FLAGS = 128u32;
+pub const ISC_REQ_ALLOCATE_MEMORY: ISC_REQ_FLAGS = 256u32;
+pub const ISC_REQ_USE_DCE_STYLE: ISC_REQ_FLAGS = 512u32;
+pub const ISC_REQ_DATAGRAM: ISC_REQ_FLAGS = 1024u32;
+pub const ISC_REQ_CONNECTION: ISC_REQ_FLAGS = 2048u32;
+pub const ISC_REQ_CALL_LEVEL: ISC_REQ_FLAGS = 4096u32;
+pub const ISC_REQ_FRAGMENT_SUPPLIED: ISC_REQ_FLAGS = 8192u32;
+pub const ISC_REQ_EXTENDED_ERROR: ISC_REQ_FLAGS = 16384u32;
+pub const ISC_REQ_STREAM: ISC_REQ_FLAGS = 32768u32;
+pub const ISC_REQ_INTEGRITY: ISC_REQ_FLAGS = 65536u32;
+pub const ISC_REQ_IDENTIFY: ISC_REQ_FLAGS = 131072u32;
+pub const ISC_REQ_NULL_SESSION: ISC_REQ_FLAGS = 262144u32;
+pub const ISC_REQ_MANUAL_CRED_VALIDATION: ISC_REQ_FLAGS = 524288u32;
+pub const ISC_REQ_RESERVED1: ISC_REQ_FLAGS = 1048576u32;
+pub const ISC_REQ_FRAGMENT_TO_FIT: ISC_REQ_FLAGS = 2097152u32;
+pub const ISC_REQ_FORWARD_CREDENTIALS: ISC_REQ_FLAGS = 4194304u32;
+pub const ISC_REQ_NO_INTEGRITY: ISC_REQ_FLAGS = 8388608u32;
+pub const ISC_REQ_USE_HTTP_STYLE: ISC_REQ_FLAGS = 16777216u32;
+pub const ISC_REQ_UNVERIFIED_TARGET_NAME: ISC_REQ_FLAGS = 536870912u32;
+pub const ISC_REQ_CONFIDENTIALITY_ONLY: ISC_REQ_FLAGS = 1073741824u32;
+#[repr(C)]
+pub struct SCHANNEL_CRED {
+    pub dwVersion: u32,
+    pub cCreds: u32,
+    pub paCred: *mut *mut CERT_CONTEXT,
+    pub hRootStore: HCERTSTORE,
+    pub cMappers: u32,
+    pub aphMappers: *mut *mut _HMAPPER,
+    pub cSupportedAlgs: u32,
+    pub palgSupportedAlgs: *mut u32,
+    pub grbitEnabledProtocols: u32,
+    pub dwMinimumCipherStrength: u32,
+    pub dwMaximumCipherStrength: u32,
+    pub dwSessionLifespan: u32,
+    pub dwFlags: SCHANNEL_CRED_FLAGS,
+    pub dwCredFormat: u32,
+}
+impl ::core::marker::Copy for SCHANNEL_CRED {}
+impl ::core::clone::Clone for SCHANNEL_CRED {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+pub const SCHANNEL_CRED_VERSION: u32 = 4u32;
+pub type SCHANNEL_CRED_FLAGS = u32;
+pub const SCH_CRED_AUTO_CRED_VALIDATION: SCHANNEL_CRED_FLAGS = 32u32;
+pub const SCH_CRED_CACHE_ONLY_URL_RETRIEVAL_ON_CREATE: SCHANNEL_CRED_FLAGS = 131072u32;
+pub const SCH_DISABLE_RECONNECTS: SCHANNEL_CRED_FLAGS = 128u32;
+pub const SCH_CRED_IGNORE_NO_REVOCATION_CHECK: SCHANNEL_CRED_FLAGS = 2048u32;
+pub const SCH_CRED_IGNORE_REVOCATION_OFFLINE: SCHANNEL_CRED_FLAGS = 4096u32;
+pub const SCH_CRED_MANUAL_CRED_VALIDATION: SCHANNEL_CRED_FLAGS = 8u32;
+pub const SCH_CRED_NO_DEFAULT_CREDS: SCHANNEL_CRED_FLAGS = 16u32;
+pub const SCH_CRED_NO_SERVERNAME_CHECK: SCHANNEL_CRED_FLAGS = 4u32;
+pub const SCH_CRED_NO_SYSTEM_MAPPER: SCHANNEL_CRED_FLAGS = 2u32;
+pub const SCH_CRED_REVOCATION_CHECK_CHAIN: SCHANNEL_CRED_FLAGS = 512u32;
+pub const SCH_CRED_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT: SCHANNEL_CRED_FLAGS = 1024u32;
+pub const SCH_CRED_REVOCATION_CHECK_END_CERT: SCHANNEL_CRED_FLAGS = 256u32;
+pub const SCH_CRED_USE_DEFAULT_CREDS: SCHANNEL_CRED_FLAGS = 64u32;
+pub const SCH_SEND_AUX_RECORD: SCHANNEL_CRED_FLAGS = 2097152u32;
+pub const SCH_SEND_ROOT_CERT: SCHANNEL_CRED_FLAGS = 262144u32;
+pub const SCH_USE_STRONG_CRYPTO: SCHANNEL_CRED_FLAGS = 4194304u32;
+pub const SCH_USE_PRESHAREDKEY_ONLY: SCHANNEL_CRED_FLAGS = 8388608u32;
+pub const SCHANNEL_SHUTDOWN: u32 = 1u32;
+#[repr(C)]
+pub struct SecBuffer {
+    pub cbBuffer: u32,
+    pub BufferType: u32,
+    pub pvBuffer: *mut ::core::ffi::c_void,
+}
+impl ::core::marker::Copy for SecBuffer {}
+impl ::core::clone::Clone for SecBuffer {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[repr(C)]
+pub struct SecBufferDesc {
+    pub ulVersion: u32,
+    pub cBuffers: u32,
+    pub pBuffers: *mut SecBuffer,
+}
+impl ::core::marker::Copy for SecBufferDesc {}
+impl ::core::clone::Clone for SecBufferDesc {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[repr(C)]
+pub struct SEC_APPLICATION_PROTOCOL_LIST {
+    pub ProtoNegoExt: SEC_APPLICATION_PROTOCOL_NEGOTIATION_EXT,
+    pub ProtocolListSize: u16,
+    pub ProtocolList: [u8; 1],
+}
+impl ::core::marker::Copy for SEC_APPLICATION_PROTOCOL_LIST {}
+impl ::core::clone::Clone for SEC_APPLICATION_PROTOCOL_LIST {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[repr(C)]
+pub struct SEC_APPLICATION_PROTOCOLS {
+    pub ProtocolListsSize: u32,
+    pub ProtocolLists: [SEC_APPLICATION_PROTOCOL_LIST; 1],
+}
+impl ::core::marker::Copy for SEC_APPLICATION_PROTOCOLS {}
+impl ::core::clone::Clone for SEC_APPLICATION_PROTOCOLS {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+pub type SEC_APPLICATION_PROTOCOL_NEGOTIATION_EXT = i32;
+pub const SecApplicationProtocolNegotiationExt_None: SEC_APPLICATION_PROTOCOL_NEGOTIATION_EXT =
+    0i32;
+pub const SecApplicationProtocolNegotiationExt_NPN: SEC_APPLICATION_PROTOCOL_NEGOTIATION_EXT = 1i32;
+pub const SecApplicationProtocolNegotiationExt_ALPN: SEC_APPLICATION_PROTOCOL_NEGOTIATION_EXT =
+    2i32;
+pub type SEC_APPLICATION_PROTOCOL_NEGOTIATION_STATUS = i32;
+pub const SecApplicationProtocolNegotiationStatus_None:
+    SEC_APPLICATION_PROTOCOL_NEGOTIATION_STATUS = 0i32;
+pub const SecApplicationProtocolNegotiationStatus_Success:
+    SEC_APPLICATION_PROTOCOL_NEGOTIATION_STATUS = 1i32;
+pub const SecApplicationProtocolNegotiationStatus_SelectedClientOnly:
+    SEC_APPLICATION_PROTOCOL_NEGOTIATION_STATUS = 2i32;
+#[repr(C)]
+pub struct SecPkgContext_ApplicationProtocol {
+    pub ProtoNegoStatus: SEC_APPLICATION_PROTOCOL_NEGOTIATION_STATUS,
+    pub ProtoNegoExt: SEC_APPLICATION_PROTOCOL_NEGOTIATION_EXT,
+    pub ProtocolIdSize: u8,
+    pub ProtocolId: [u8; 255],
+}
+impl ::core::marker::Copy for SecPkgContext_ApplicationProtocol {}
+impl ::core::clone::Clone for SecPkgContext_ApplicationProtocol {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[repr(C)]
+pub struct SecPkgContext_SessionInfo {
+    pub dwFlags: u32,
+    pub cbSessionId: u32,
+    pub rgbSessionId: [u8; 32],
+}
+impl ::core::marker::Copy for SecPkgContext_SessionInfo {}
+impl ::core::clone::Clone for SecPkgContext_SessionInfo {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+#[repr(C)]
+pub struct SecPkgContext_StreamSizes {
+    pub cbHeader: u32,
+    pub cbTrailer: u32,
+    pub cbMaximumMessage: u32,
+    pub cBuffers: u32,
+    pub cbBlockSize: u32,
+}
+impl ::core::marker::Copy for SecPkgContext_StreamSizes {}
+impl ::core::clone::Clone for SecPkgContext_StreamSizes {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+pub type SECPKG_ATTR = u32;
+pub const SECPKG_ATTR_C_ACCESS_TOKEN: SECPKG_ATTR = 2147483666u32;
+pub const SECPKG_ATTR_C_FULL_ACCESS_TOKEN: SECPKG_ATTR = 2147483778u32;
+pub const SECPKG_ATTR_CERT_TRUST_STATUS: SECPKG_ATTR = 2147483780u32;
+pub const SECPKG_ATTR_CREDS: SECPKG_ATTR = 2147483776u32;
+pub const SECPKG_ATTR_CREDS_2: SECPKG_ATTR = 2147483782u32;
+pub const SECPKG_ATTR_NEGOTIATION_PACKAGE: SECPKG_ATTR = 2147483777u32;
+pub const SECPKG_ATTR_PACKAGE_INFO: SECPKG_ATTR = 10u32;
+pub const SECPKG_ATTR_SERVER_AUTH_FLAGS: SECPKG_ATTR = 2147483779u32;
+pub const SECPKG_ATTR_SIZES: SECPKG_ATTR = 0u32;
+pub const SECPKG_ATTR_SUBJECT_SECURITY_ATTRIBUTES: SECPKG_ATTR = 124u32;
+pub const SECPKG_ATTR_APP_DATA: SECPKG_ATTR = 94u32;
+pub const SECPKG_ATTR_EAP_PRF_INFO: SECPKG_ATTR = 101u32;
+pub const SECPKG_ATTR_EARLY_START: SECPKG_ATTR = 105u32;
+pub const SECPKG_ATTR_DTLS_MTU: SECPKG_ATTR = 34u32;
+pub const SECPKG_ATTR_KEYING_MATERIAL_INFO: SECPKG_ATTR = 106u32;
+pub const SECPKG_ATTR_ACCESS_TOKEN: SECPKG_ATTR = 18u32;
+pub const SECPKG_ATTR_AUTHORITY: SECPKG_ATTR = 6u32;
+pub const SECPKG_ATTR_CLIENT_SPECIFIED_TARGET: SECPKG_ATTR = 27u32;
+pub const SECPKG_ATTR_CONNECTION_INFO: SECPKG_ATTR = 90u32;
+pub const SECPKG_ATTR_DCE_INFO: SECPKG_ATTR = 3u32;
+pub const SECPKG_ATTR_ENDPOINT_BINDINGS: SECPKG_ATTR = 26u32;
+pub const SECPKG_ATTR_EAP_KEY_BLOCK: SECPKG_ATTR = 91u32;
+pub const SECPKG_ATTR_FLAGS: SECPKG_ATTR = 14u32;
+pub const SECPKG_ATTR_ISSUER_LIST_EX: SECPKG_ATTR = 89u32;
+pub const SECPKG_ATTR_KEY_INFO: SECPKG_ATTR = 5u32;
+pub const SECPKG_ATTR_LAST_CLIENT_TOKEN_STATUS: SECPKG_ATTR = 30u32;
+pub const SECPKG_ATTR_LIFESPAN: SECPKG_ATTR = 2u32;
+pub const SECPKG_ATTR_LOCAL_CERT_CONTEXT: SECPKG_ATTR = 84u32;
+pub const SECPKG_ATTR_LOCAL_CRED: SECPKG_ATTR = 82u32;
+pub const SECPKG_ATTR_NAMES: SECPKG_ATTR = 1u32;
+pub const SECPKG_ATTR_NATIVE_NAMES: SECPKG_ATTR = 13u32;
+pub const SECPKG_ATTR_NEGOTIATION_INFO: SECPKG_ATTR = 12u32;
+pub const SECPKG_ATTR_PASSWORD_EXPIRY: SECPKG_ATTR = 8u32;
+pub const SECPKG_ATTR_REMOTE_CERT_CONTEXT: SECPKG_ATTR = 83u32;
+pub const SECPKG_ATTR_ROOT_STORE: SECPKG_ATTR = 85u32;
+pub const SECPKG_ATTR_SESSION_KEY: SECPKG_ATTR = 9u32;
+pub const SECPKG_ATTR_SESSION_INFO: SECPKG_ATTR = 93u32;
+pub const SECPKG_ATTR_STREAM_SIZES: SECPKG_ATTR = 4u32;
+pub const SECPKG_ATTR_SUPPORTED_SIGNATURES: SECPKG_ATTR = 102u32;
+pub const SECPKG_ATTR_TARGET_INFORMATION: SECPKG_ATTR = 17u32;
+pub const SECPKG_ATTR_UNIQUE_BINDINGS: SECPKG_ATTR = 25u32;
+pub const SECPKG_ATTR_APPLICATION_PROTOCOL: u32 = 35u32;
+pub type SECPKG_CRED = u32;
+pub const SECPKG_CRED_INBOUND: SECPKG_CRED = 1u32;
+pub const SECPKG_CRED_OUTBOUND: SECPKG_CRED = 2u32;
+pub type SEC_GET_KEY_FN = ::core::option::Option<
+    unsafe extern "system" fn(
+        arg: *mut ::core::ffi::c_void,
+        principal: *mut ::core::ffi::c_void,
+        keyver: u32,
+        key: *mut *mut ::core::ffi::c_void,
+        status: *mut HRESULT,
+    ) -> (),
+>;
+pub const SSL_SESSION_RECONNECT: u32 = 1u32;
+#[repr(C)]
+pub struct _HMAPPER(pub u8);
+::windows_targets::link ! ( "secur32.dll""system" fn AcceptSecurityContext ( phcredential : *const SecHandle , phcontext : *const SecHandle , pinput : *const SecBufferDesc , fcontextreq : ASC_REQ_FLAGS , targetdatarep : u32 , phnewcontext : *mut SecHandle , poutput : *mut SecBufferDesc , pfcontextattr : *mut u32 , ptsexpiry : *mut i64 ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn AcquireCredentialsHandleA ( pszprincipal : PCSTR , pszpackage : PCSTR , fcredentialuse : SECPKG_CRED , pvlogonid : *const ::core::ffi::c_void , pauthdata : *const ::core::ffi::c_void , pgetkeyfn : SEC_GET_KEY_FN , pvgetkeyargument : *const ::core::ffi::c_void , phcredential : *mut SecHandle , ptsexpiry : *mut i64 ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn ApplyControlToken ( phcontext : *const SecHandle , pinput : *const SecBufferDesc ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn DecryptMessage ( phcontext : *const SecHandle , pmessage : *const SecBufferDesc , messageseqno : u32 , pfqop : *mut u32 ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn DeleteSecurityContext ( phcontext : *const SecHandle ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn EncryptMessage ( phcontext : *const SecHandle , fqop : u32 , pmessage : *const SecBufferDesc , messageseqno : u32 ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn FreeContextBuffer ( pvcontextbuffer : *mut ::core::ffi::c_void ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn FreeCredentialsHandle ( phcredential : *const SecHandle ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn InitializeSecurityContextW ( phcredential : *const SecHandle , phcontext : *const SecHandle , psztargetname : *const u16 , fcontextreq : ISC_REQ_FLAGS , reserved1 : u32 , targetdatarep : u32 , pinput : *const SecBufferDesc , reserved2 : u32 , phnewcontext : *mut SecHandle , poutput : *mut SecBufferDesc , pfcontextattr : *mut u32 , ptsexpiry : *mut i64 ) -> HRESULT );
+::windows_targets::link ! ( "secur32.dll""system" fn QueryContextAttributesW ( phcontext : *const SecHandle , ulattribute : SECPKG_ATTR , pbuffer : *mut ::core::ffi::c_void ) -> HRESULT );
+pub type BOOL = i32;
 #[repr(C)]
 pub struct FILETIME {
     pub dwLowDateTime: u32,
@@ -764,4 +1089,5 @@ impl ::core::clone::Clone for CRYPT_ENCODE_PARA {
 ::windows_targets::link ! ( "crypt32.dll""system" fn CryptMsgEncodeAndSignCTL ( dwmsgencodingtype : u32 , pctlinfo : *const CTL_INFO , psigninfo : *const CMSG_SIGNED_ENCODE_INFO , dwflags : u32 , pbencoded : *mut u8 , pcbencoded : *mut u32 ) -> BOOL );
 ::windows_targets::link ! ( "advapi32.dll""system" fn CryptReleaseContext ( hprov : usize , dwflags : u32 ) -> BOOL );
 ::windows_targets::link ! ( "crypt32.dll""system" fn CryptStringToBinaryA ( pszstring : PCSTR , cchstring : u32 , dwflags : CRYPT_STRING , pbbinary : *mut u8 , pcbbinary : *mut u32 , pdwskip : *mut u32 , pdwflags : *mut u32 ) -> BOOL );
-::windows_targets::link ! ( "kernel32.dll""system" fn LocalFree(hmem: isize) -> isize);
+pub type HLOCAL = isize;
+::windows_targets::link ! ( "kernel32.dll""system" fn LocalFree ( hmem : HLOCAL ) -> HLOCAL );
