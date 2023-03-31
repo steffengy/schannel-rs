@@ -18,6 +18,8 @@ use crate::Inner;
 
 #[allow(non_camel_case_types, non_snake_case)]
 mod time {
+    use super::BOOL;
+
     #[repr(C)]
     pub struct SYSTEMTIME {
         pub wYear: u16,
@@ -34,18 +36,9 @@ mod time {
         pub dwLowDateTime: u32,
         pub dwHighDateTime: u32,
     }
-    #[link(name = "windows")] // kernel32
-    extern "system" {
-        pub fn GetSystemTime(lpSystemTime: *mut SYSTEMTIME);
-        pub fn SystemTimeToFileTime(
-            lpSystemTime: *const SYSTEMTIME,
-            lpFileTime: *mut FILETIME,
-        ) -> super::BOOL;
-        pub fn FileTimeToSystemTime(
-            lpFileTime: *const FILETIME,
-            lpSystemTime: *mut SYSTEMTIME,
-        ) -> super::BOOL;
-    }
+    ::windows_targets::link!("kernel32.dll""system" fn GetSystemTime(lpSystemTime: *mut SYSTEMTIME) -> ());
+    ::windows_targets::link!("kernel32.dll""system" fn SystemTimeToFileTime(lpSystemTime: *const SYSTEMTIME, lpFileTime: *mut FILETIME) -> BOOL);
+    ::windows_targets::link!("kernel32.dll""system" fn FileTimeToSystemTime(lpFileTime: *const FILETIME, lpSystemTime: *mut SYSTEMTIME) -> BOOL);
 }
 
 #[allow(non_camel_case_types, non_snake_case)]
@@ -76,39 +69,9 @@ mod test_bindings {
         pub rgExtension: *mut CERT_EXTENSION,
     }
 
-    #[link(name = "windows")] // crypt32
-    extern "system" {
-        pub fn CertCreateSelfSignCertificate(
-            hCryptProvOrNCryptKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE,
-            pSubjectIssuerBlob: *const CRYPT_INTEGER_BLOB,
-            dwFlags: CERT_CREATE_SELFSIGN_FLAGS,
-            pKeyProvInfo: *const CRYPT_KEY_PROV_INFO,
-            pSignatureAlgorithm: *const CRYPT_ALGORITHM_IDENTIFIER,
-            pStartTime: *const super::time::SYSTEMTIME,
-            pEndTime: *const super::time::SYSTEMTIME,
-            pExtensions: *const CERT_EXTENSIONS,
-        ) -> *mut CERT_CONTEXT;
-
-        pub fn CertStrToNameW(
-            dwCertEncodingType: CERT_QUERY_ENCODING_TYPE,
-            pszX500: *const u16,
-            dwStrType: CERT_STRING_TYPE,
-            pvReserved: *const std::ffi::c_void,
-            pbEncoded: *mut u8,
-            pcbEncoded: *mut u32,
-            ppszError: *mut *mut u16,
-        ) -> BOOL;
-    }
-
-    #[link(name = "windows")] // advapi32
-    extern "system" {
-        pub fn CryptGenKey(
-            hProv: usize,
-            Algid: u32,
-            dwFlags: CRYPT_KEY_FLAGS,
-            phKey: *mut usize,
-        ) -> BOOL;
-    }
+    ::windows_targets::link!( "crypt32.dll""system" fn CertCreateSelfSignCertificate(hCryptProvOrNCryptKey: HCRYPTPROV_OR_NCRYPT_KEY_HANDLE, pSubjectIssuerBlob: *const CRYPT_INTEGER_BLOB, dwFlags: CERT_CREATE_SELFSIGN_FLAGS, pKeyProvInfo: *const CRYPT_KEY_PROV_INFO, pSignatureAlgorithm: *const CRYPT_ALGORITHM_IDENTIFIER, pStartTime: *const super::time::SYSTEMTIME, pEndTime: *const super::time::SYSTEMTIME, pExtensions: *const CERT_EXTENSIONS) -> *mut CERT_CONTEXT);
+    ::windows_targets::link!( "crypt32.dll""system" fn CertStrToNameW(dwCertEncodingType: CERT_QUERY_ENCODING_TYPE, pszX500: *const u16, dwStrType: CERT_STRING_TYPE, pvReserved: *const std::ffi::c_void, pbEncoded: *mut u8, pcbEncoded: *mut u32, ppszError: *mut *mut u16) -> BOOL);
+    ::windows_targets::link!( "advapi32.dll""system" fn CryptGenKey(hProv: usize, Algid: u32, dwFlags: CRYPT_KEY_FLAGS, phKey: *mut usize) -> BOOL);
 }
 
 #[test]

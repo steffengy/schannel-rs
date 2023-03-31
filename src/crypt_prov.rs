@@ -173,11 +173,6 @@ impl ProviderType {
     }
 }
 
-#[link(name = "windows")] // kernel3
-extern "system" {
-    fn LocalFree(hMem: isize) -> isize;
-}
-
 /// A builder for key imports.
 pub struct ImportOptions<'a> {
     prov: &'a mut CryptProv,
@@ -207,7 +202,7 @@ impl<'a> ImportOptions<'a> {
 
             let mut key = 0;
             let res = Cryptography::CryptImportKey(self.prov.0, buf, len, 0, self.flags, &mut key);
-            LocalFree(buf as isize);
+            Cryptography::LocalFree(buf as isize);
 
             if res != 0 {
                 Ok(CryptKey::from_inner(key))
@@ -242,7 +237,7 @@ impl<'a> ImportOptions<'a> {
             let pkey = pkey.PrivateKey;
 
             let res = self.import(slice::from_raw_parts(pkey.pbData, pkey.cbData as usize));
-            LocalFree(buf as isize);
+            Cryptography::LocalFree(buf as isize);
             res
         }
     }

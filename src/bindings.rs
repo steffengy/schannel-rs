@@ -1,10 +1,10 @@
 #![allow(non_camel_case_types, non_snake_case)]
 
 pub type BOOL = i32;
-pub type Hresult = i32;
+pub type HRESULT = i32;
 
-pub const S_OK: Hresult = 0;
-pub const CRYPT_E_NOT_FOUND: Hresult = -2146885628;
+pub const S_OK: HRESULT = 0;
+pub const CRYPT_E_NOT_FOUND: HRESULT = -2146885628;
 
 pub const SEC_E_OK: i32 = 0;
 pub const SEC_I_CONTINUE_NEEDED: i32 = 590610;
@@ -14,6 +14,26 @@ pub const SEC_I_CONTEXT_EXPIRED: i32 = 590615;
 pub const SEC_E_INCOMPLETE_MESSAGE: i32 = -2146893032;
 
 pub const ERROR_SUCCESS: u32 = 0;
+
+#[repr(C)]
+pub struct GUID {
+    pub data1: u32,
+    pub data2: u16,
+    pub data3: u16,
+    pub data4: [u8; 8],
+}
+
+impl ::core::marker::Copy for GUID {}
+impl ::core::clone::Clone for GUID {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+pub type PSTR = *mut u8;
+pub type PWSTR = *mut u16;
+pub type PCSTR = *const u8;
+pub type PCWSTR = *const u16;
 
 pub(crate) mod cryptography;
 pub(crate) mod identity;
@@ -280,6 +300,8 @@ pub(crate) mod identity;
 //             "Windows.Win32.Security.Cryptography.CryptMsgEncodeAndSignCTL",
 //             "Windows.Win32.Security.Cryptography.CryptReleaseContext",
 //             "Windows.Win32.Security.Cryptography.CryptStringToBinaryA",
+//
+//             "Windows.Win32.System.Memory.LocalFree",
 //         ];
 
 //         let bindings = windows_bindgen::standalone(&apis);
