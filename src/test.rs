@@ -304,10 +304,7 @@ fn verify_callback_gives_failed_cert() {
     let err = tls_stream::Builder::new()
         .domain("self-signed.badssl.com")
         .verify_callback(|validation_result| {
-            let expected_finger = vec![
-                0x31, 0xCF, 0x9F, 0x34, 0x65, 0x7B, 0xF1, 0xA7, 0xA2, 0xAA,
-                0xB0, 0x4F, 0x46, 0x48, 0x19, 0x42, 0x83, 0x6D, 0x84, 0xE2,
-            ];
+            let expected_finger = include_bytes!("../test/self-signed.badssl.com.cer.sha1").to_vec();
             assert_eq!(
                 validation_result
                     .failed_certificate()
