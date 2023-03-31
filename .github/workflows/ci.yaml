@@ -37,6 +37,7 @@ jobs:
         run: |
           scoop install -a 32bit mingw
           Join-Path (Resolve-Path ~).Path "scoop\apps\mingw\current\bin" >> $env:GITHUB_PATH
-      - run: update_test_cert.bat
+      - shell: cmd
+        run: ./update_test_cert.bat
       - run: cargo +${{ matrix.channel }} build --tests --target ${{ matrix.target }}
       - run: cargo +${{ matrix.channel }} test --target ${{ matrix.target }}
