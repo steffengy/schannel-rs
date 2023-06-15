@@ -14,6 +14,8 @@ use crate::cert_context::CertContext;
 use crate::ctl_context::CtlContext;
 use crate::Inner;
 
+const PKCS12_NAMED_NO_PERSIST_KEY: u32 = 0x00020000u32;
+
 /// Representation of certificate store on Windows, wrapping a `HCERTSTORE`.
 pub struct CertStore(Cryptography::HCERTSTORE);
 
@@ -303,6 +305,16 @@ impl PfxImportOptions {
         self.flag(Cryptography::PKCS12_NO_PERSIST_KEY, no_persist_key)
     }
 
+    /// If set, the private key in the archive will not be persisted and will be named.
+    ///
+    /// If not set, private keys are persisted on disk and must be manually deleted.
+    pub fn named_no_persist_key(&mut self, no_persist_key: bool) -> &mut PfxImportOptions {
+        #[allow(non_snake_case)]
+        self.flag(PKCS12_NAMED_NO_PERSIST_KEY 
+            | Cryptography::PKCS12_NO_PERSIST_KEY
+            | Cryptography::PKCS12_ALWAYS_CNG_KSP, no_persist_key)
+    }
+
     /// If set, all extended properties of the certificate will be imported.
     pub fn include_extended_properties(
         &mut self,
@@ -335,6 +347,14 @@ impl PfxImportOptions {
             let store = Cryptography::PFXImportCertStore(&blob, password, self.flags);
             if !store.is_null() {
                 Ok(CertStore(store))
+            } else if 0 != (self.flags & PKCS12_NAMED_NO_PERSIST_KEY) {
+                let flags = self.flags & !(Cryptography::PKCS12_NO_PERSIST_KEY | PKCS12_NAMED_NO_PERSIST_KEY);
+                let store = Cryptography::PFXImportCertStore(&blob, password, flags);
+                if !store.is_null() {
+                    Ok(CertStore(store))
+                } else {
+                    Err(io::Error::last_os_error())
+                }
             } else {
                 Err(io::Error::last_os_error())
             }
