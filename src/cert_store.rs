@@ -488,4 +488,27 @@ mod test {
             .count();
         assert_eq!(pkeys, 1);
     }
+
+    #[test]
+    fn pfx_import_named_no_persist() {
+        let pfx = include_bytes!("../test/identity.p12");
+        let store = PfxImportOptions::new()
+            .include_extended_properties(true)
+            .password("mypass")
+            .named_no_persist_key(true)
+            .import(pfx)
+            .unwrap();
+        assert_eq!(store.certs().count(), 2);
+        let pkeys = store
+            .certs()
+            .filter(|c| {
+                c.private_key()
+                    .compare_key(true)
+                    .silent(true)
+                    .acquire()
+                    .is_ok()
+            })
+            .count();
+        assert_eq!(pkeys, 1);
+    }
 }
