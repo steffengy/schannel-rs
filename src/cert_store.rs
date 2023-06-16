@@ -306,7 +306,7 @@ impl PfxImportOptions {
     }
 
     /// If set, the private key in the archive will not be persisted and will be named.
-    ///
+    /// Named keys are required to be used by schannel.
     /// If not set, private keys are persisted on disk and must be manually deleted.
     pub fn named_no_persist_key(&mut self, no_persist_key: bool) -> &mut PfxImportOptions {
         #[allow(non_snake_case)]
