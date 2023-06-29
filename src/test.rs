@@ -402,8 +402,6 @@ fn session_resumption_thread_safety() {
 
 const FRIENDLY_NAME: &str = "schannel-rs localhost testing cert";
 
-static szOID_RSA_SHA256RSA: &[u8] = null_terminate!(Cryptography::szOID_RSA_SHA256RSA);
-
 fn install_certificate() -> io::Result<CertContext> {
     unsafe {
         let mut provider = 0;
@@ -465,7 +463,7 @@ fn install_certificate() -> io::Result<CertContext> {
             return Err(Error::last_os_error());
         }
 
-        let subject_issuer = Cryptography::CRYPTOAPI_BLOB {
+        let subject_issuer = Cryptography::CRYPT_INTEGER_BLOB {
             cbData: cname_len,
             pbData: cname_buffer.as_ptr() as *mut u8,
         };
@@ -479,7 +477,7 @@ fn install_certificate() -> io::Result<CertContext> {
             dwKeySpec: Cryptography::AT_SIGNATURE,
         };
         let sig_algorithm = Cryptography::CRYPT_ALGORITHM_IDENTIFIER {
-            pszObjId: szOID_RSA_SHA256RSA.as_ptr() as *mut _,
+            pszObjId: Cryptography::szOID_RSA_SHA256RSA as *mut _,
             Parameters: mem::zeroed(),
         };
         let mut expiration_date: Foundation::SYSTEMTIME = mem::zeroed();
