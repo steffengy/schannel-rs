@@ -26,6 +26,7 @@ jobs:
         include:
           - target: i686-pc-windows-gnu
             channel: 1.46.0
+            os: windows-2022
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@master
