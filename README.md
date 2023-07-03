@@ -1,4 +1,4 @@
-schannel-rs [![Build status](https://ci.appveyor.com/api/projects/status/vefyauaf0oj10swu/branch/master?svg=true)](https://ci.appveyor.com/project/steffengy/schannel-rs/branch/master)
+schannel-rs [![.github/workflows/ci.yaml](https://github.com/steffengy/schannel-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/steffengy/schannel-rs/actions/workflows/ci.yaml)
 =====
 
 [Documentation](https://docs.rs/schannel/0/x86_64-pc-windows-msvc/schannel/)

@@ -540,7 +540,7 @@ test suite with SCHANNEL_RS_SKIP_SERVER_TESTS=1.
 }
 
 fn local_root_store() -> CertStore {
-    if env::var("APPVEYOR").is_ok() {
+    if env::var("APPVEYOR").is_ok() || env::var("CI").is_ok() {
         CertStore::open_local_machine("Root").unwrap()
     } else {
         CertStore::open_current_user("Root").unwrap()
