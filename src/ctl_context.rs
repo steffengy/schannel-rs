@@ -11,8 +11,6 @@ use windows_sys::Win32::Security::Cryptography;
 use crate::cert_context::CertContext;
 use crate::Inner;
 
-static szOID_OIWSEC_sha1: &[u8] = null_terminate!(Cryptography::szOID_OIWSEC_sha1);
-
 /// Wrapped `PCCTL_CONTEXT` which represents a certificate trust list to
 /// Windows.
 pub struct CtlContext(*const Cryptography::CTL_CONTEXT);
@@ -100,7 +98,7 @@ impl Builder {
             ctl_info.dwVersion = Cryptography::CTL_V1;
             ctl_info.SubjectUsage.cUsageIdentifier = usages.len() as u32;
             ctl_info.SubjectUsage.rgpszUsageIdentifier = usages.as_mut_ptr();
-            ctl_info.SubjectAlgorithm.pszObjId = szOID_OIWSEC_sha1.as_ptr() as _;
+            ctl_info.SubjectAlgorithm.pszObjId = Cryptography::szOID_OIWSEC_sha1 as _;
             ctl_info.cCTLEntry = entries.len() as u32;
             ctl_info.rgCTLEntry = entries.as_mut_ptr();
 
@@ -109,7 +107,7 @@ impl Builder {
             let mut encoded_certs = self
                 .certificates
                 .iter()
-                .map(|c| Cryptography::CRYPTOAPI_BLOB {
+                .map(|c| Cryptography::CRYPT_INTEGER_BLOB {
                     cbData: (*c.as_inner()).cbCertEncoded,
                     pbData: (*c.as_inner()).pbCertEncoded,
                 })

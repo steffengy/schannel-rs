@@ -10,8 +10,6 @@ use windows_sys::Win32::Security::{Credentials, Cryptography};
 use crate::cert_context::CertContext;
 use crate::Inner;
 
-static UNISP_NAME: &[u8] = null_terminate!(Identity::UNISP_NAME);
-
 /// The communication direction that an `SchannelCred` will support.
 #[derive(Copy, Debug, Clone, PartialEq, Eq)]
 pub enum Direction {
@@ -248,7 +246,7 @@ impl Builder {
 
             match Identity::AcquireCredentialsHandleA(
                 ptr::null(),
-                UNISP_NAME.as_ptr(),
+                Identity::UNISP_NAME_A,
                 direction,
                 ptr::null_mut(),
                 &mut cred_data as *const _ as *const _,
