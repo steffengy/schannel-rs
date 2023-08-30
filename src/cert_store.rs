@@ -314,6 +314,14 @@ impl PfxImportOptions {
         )
     }
 
+    /// If set, the private key in the archive will be exportable.
+    pub fn exportable_private_key(
+        &mut self,
+        exportable_private_key: bool,
+    ) -> &mut PfxImportOptions {
+        self.flag(Cryptography::CRYPT_EXPORTABLE, exportable_private_key)
+    }
+
     fn flag(&mut self, flag: u32, set: bool) -> &mut PfxImportOptions {
         if set {
             self.flags |= flag;
