@@ -314,7 +314,7 @@ impl PfxImportOptions {
         )
     }
 
-    /// If set, the private key in the archive will be exportable.
+    /// If set, the private key in the archive will be exportable.    
     pub fn exportable_private_key(
         &mut self,
         exportable_private_key: bool,
@@ -329,6 +329,11 @@ impl PfxImportOptions {
             self.flags &= !flag;
         }
         self
+    }
+
+    /// If set, the private keys are stored under the local computer and not under the current user.
+    pub fn machine_keyset(&mut self, machine_keyset: bool) -> &mut PfxImportOptions {
+        self.flag(Cryptography::CRYPT_MACHINE_KEYSET, machine_keyset)
     }
 
     /// Imports certificates from a PKCS #12 archive, returning a `CertStore` containing them.
