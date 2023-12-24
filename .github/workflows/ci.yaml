@@ -22,7 +22,7 @@ jobs:
         channel: [nightly]
         include:
           - target: i686-pc-windows-gnu
-            channel: 1.46.0
+            channel: 1.56.0
             os: windows-2022
     steps:
       - uses: actions/checkout@v3
