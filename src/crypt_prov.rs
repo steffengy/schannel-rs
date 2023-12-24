@@ -5,7 +5,7 @@ use std::ptr;
 use std::slice;
 
 use windows_sys::Win32::Security::Cryptography;
-use windows_sys::Win32::System::Memory;
+use windows_sys::Win32::Foundation;
 
 use crate::crypt_key::CryptKey;
 use crate::Inner;
@@ -204,7 +204,7 @@ impl<'a> ImportOptions<'a> {
 
             let mut key = 0;
             let res = Cryptography::CryptImportKey(self.prov.0, buf, len, 0, self.flags, &mut key);
-            Memory::LocalFree(buf as isize);
+            Foundation::LocalFree(buf as *mut _);
 
             if res != 0 {
                 Ok(CryptKey::from_inner(key))
@@ -239,7 +239,7 @@ impl<'a> ImportOptions<'a> {
             let pkey = pkey.PrivateKey;
 
             let res = self.import(slice::from_raw_parts(pkey.pbData, pkey.cbData as usize));
-            Memory::LocalFree(buf as isize);
+            Foundation::LocalFree(buf as *mut _);
             res
         }
     }
