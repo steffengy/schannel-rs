@@ -645,9 +645,9 @@ where
         }
     }
 
-    /// Returns true when the certificate was succesfully verified
-    /// Returns false, when a verification isn't necessary (yet)
-    /// Returns an error when the verification failed
+    /// Returns true when the certificate was successfully verified.
+    /// Returns false, when a verification isn't necessary (yet).
+    /// Returns an error when the verification failed.
     fn validate(&mut self, require_cert: bool) -> io::Result<bool> {
         // If we're accepting connections then we don't perform any validation
         // for the remote certificate, that's what they're doing!

@@ -101,7 +101,7 @@ impl CertStore {
     /// Opens up the specified key store within the context of the current user.
     ///
     /// Common valid values for `which` are "My", "Root", "Trust", "CA".
-    /// Additonal MSDN docs https://docs.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore#remarks
+    /// Additional MSDN docs https://docs.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore#remarks
     pub fn open_current_user(which: &str) -> io::Result<CertStore> {
         unsafe {
             let data = OsStr::new(which)
@@ -127,7 +127,7 @@ impl CertStore {
     /// Opens up the specified key store within the context of the local machine.
     ///
     /// Common valid values for `which` are "My", "Root", "Trust", "CA".
-    /// Additonal MSDN docs https://docs.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore#remarks
+    /// Additional MSDN docs https://docs.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore#remarks
     pub fn open_local_machine(which: &str) -> io::Result<CertStore> {
         unsafe {
             let data = OsStr::new(which)
