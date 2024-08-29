@@ -16,6 +16,7 @@ use crate::ncrypt_key::NcryptKey;
 use crate::Inner;
 
 /// A supported hashing algorithm
+#[derive(Copy, Clone)]
 pub struct HashAlgorithm(u32, usize);
 
 #[allow(missing_docs)]
