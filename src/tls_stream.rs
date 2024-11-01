@@ -527,9 +527,6 @@ where
                     if let Some(to_write) = to_write {
                         self.out_buf.get_mut().extend_from_slice(&to_write);
                     }
-                    if self.enc_in.position() != 0 {
-                        self.decrypt()?;
-                    }
                     if let State::Initializing {
                         ref mut more_calls, ..
                     } = self.state
