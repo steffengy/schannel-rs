@@ -27,7 +27,7 @@ jobs:
     env:
       SCHANNEL_SKIP_TLS_13_TEST: ${{ matrix.os == 'windows-2019' && '1' || '0' }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.channel }}
