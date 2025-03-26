@@ -554,11 +554,17 @@ where
                     } else {
                         self.enc_in.position() as usize
                     };
-                    let to_write = ContextBuffer(outbufs[0]);
+                    let to_write = if outbufs[0].pvBuffer.is_null() {
+                        None
+                    } else {
+                        Some(ContextBuffer(outbufs[0]))
+                    };
 
                     self.consume_enc_in(nread);
                     self.needs_read = (self.enc_in.position() == 0) as usize;
-                    self.out_buf.get_mut().extend_from_slice(&to_write);
+                    if let Some(to_write) = to_write {
+                        self.out_buf.get_mut().extend_from_slice(&to_write);
+                    }
                 }
                 Foundation::SEC_E_INCOMPLETE_MESSAGE => {
                     self.needs_read = if inbufs[1].BufferType == Identity::SECBUFFER_MISSING {
