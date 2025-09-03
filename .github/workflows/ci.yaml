@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-2022, windows-2019]
+        os: [windows-2022, windows-2025]
         target:
           [x86_64-pc-windows-msvc, i686-pc-windows-msvc, x86_64-pc-windows-gnu]
         channel: [nightly]
@@ -24,8 +24,6 @@ jobs:
           - target: i686-pc-windows-gnu
             channel: 1.60.0
             os: windows-2022
-    env:
-      SCHANNEL_SKIP_TLS_13_TEST: ${{ matrix.os == 'windows-2019' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@master
@@ -34,13 +32,11 @@ jobs:
           target: ${{ matrix.target }}
       - if: matrix.target == 'i686-pc-windows-gnu'
         uses: MinoruSekine/setup-scoop@main
-      - shell: cmd
-        run: echo %SCHANNEL_SKIP_TLS_13_TEST%
       - if: matrix.target == 'i686-pc-windows-gnu'
         run: |
           scoop install -a 32bit mingw
           Join-Path (Resolve-Path ~).Path "scoop\apps\mingw\current\bin" >> $env:GITHUB_PATH
       - shell: cmd
-        run: ./update_test_cert.bat
+        run: powershell ./update_test_cert.ps1
       - run: cargo +${{ matrix.channel }} build --tests --target ${{ matrix.target }}
       - run: cargo +${{ matrix.channel }} test --target ${{ matrix.target }}
