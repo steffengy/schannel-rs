@@ -9,7 +9,7 @@ repository = "https://github.com/steffengy/schannel-rs"
 readme = "README.md"
 keywords = ["windows", "schannel", "tls", "ssl", "https"]
 edition = "2018"
-rust-version = "1.60.0"
+rust-version = "1.71.0"
 
 [package.metadata.docs.rs]
 default-target = "x86_64-pc-windows-msvc"
