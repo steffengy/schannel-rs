@@ -103,6 +103,20 @@ impl CertStore {
     /// Common valid values for `which` are "My", "Root", "Trust", "CA".
     /// Additonal MSDN docs https://docs.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certopenstore#remarks
     pub fn open_current_user(which: &str) -> io::Result<CertStore> {
+        Self::open_current_user_with_flags(which, current_user_store_flags())
+    }
+
+    /// Opens the specified current-user key store with read-only access.
+    ///
+    /// Use this when only reading certificates. Registry-backed stores are
+    /// opened with read access, and attempts to modify the store fail.
+    ///
+    /// Common valid values for `which` are "My", "Root", "Trust", "CA".
+    pub fn open_current_user_read_only(which: &str) -> io::Result<CertStore> {
+        Self::open_current_user_with_flags(which, current_user_read_only_store_flags())
+    }
+
+    fn open_current_user_with_flags(which: &str, flags: u32) -> io::Result<CertStore> {
         unsafe {
             let data = OsStr::new(which)
                 .encode_wide()
@@ -112,8 +126,7 @@ impl CertStore {
                 Cryptography::CERT_STORE_PROV_SYSTEM_W,
                 Cryptography::CERT_QUERY_ENCODING_TYPE::default(),
                 Cryptography::HCRYPTPROV_LEGACY::default(),
-                Cryptography::CERT_SYSTEM_STORE_CURRENT_USER_ID
-                    << Cryptography::CERT_SYSTEM_STORE_LOCATION_SHIFT,
+                flags,
                 data.as_ptr() as *mut _,
             );
             if !store.is_null() {
@@ -432,6 +445,15 @@ impl Memory {
     pub fn into_store(self) -> CertStore {
         self.0
     }
+}
+
+fn current_user_store_flags() -> u32 {
+    Cryptography::CERT_SYSTEM_STORE_CURRENT_USER_ID
+        << Cryptography::CERT_SYSTEM_STORE_LOCATION_SHIFT
+}
+
+fn current_user_read_only_store_flags() -> u32 {
+    current_user_store_flags() | Cryptography::CERT_STORE_READONLY_FLAG
 }
 
 #[cfg(test)]
