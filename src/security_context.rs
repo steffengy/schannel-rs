@@ -89,7 +89,12 @@ impl SecurityContext {
                 ptr::null_mut(),
             ) {
                 Foundation::SEC_I_CONTINUE_NEEDED => {
-                    Ok((SecurityContext(ctxt), Some(ContextBuffer(outbuf[0]))))
+                    let buf = if outbuf[0].pvBuffer.is_null() {
+                        None
+                    } else {
+                        Some(ContextBuffer(outbuf[0]))
+                    };
+                    Ok((SecurityContext(ctxt), buf))
                 }
                 err => Err(io::Error::from_raw_os_error(err)),
             }
