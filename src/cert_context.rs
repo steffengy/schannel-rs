@@ -557,7 +557,7 @@ pub struct SetKeyProvInfo<'a> {
 impl<'a> SetKeyProvInfo<'a> {
     /// The name of the key container.
     ///
-    /// If `type_` is not provided, this specifies the name of the key withing
+    /// If `type_` is not provided, this specifies the name of the key within
     /// the CNG key storage provider.
     pub fn container(&mut self, container: &str) -> &mut SetKeyProvInfo<'a> {
         self.container = Some(container.encode_utf16().chain(Some(0)).collect());
